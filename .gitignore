@@ -53,4 +53,5 @@ Thumbs.db
 desktop.ini
 
 # Project-specific private/reference material
-technical_docs/
+technical_docs/*
+!technical_docs/*.md
