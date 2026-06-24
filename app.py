@@ -61,11 +61,17 @@ app.config['SECRET_KEY'] = os.urandom(24)
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
 RESULTS_DIR = BASE_DIR / 'results'
+SETTINGS_FILE = BASE_DIR / 'settings.json'
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
 
 # In-memory store for ongoing runs
 run_store: dict = {}
+cleanup_started = False
+
+DEFAULT_SETTINGS = {
+    'cleanup_age_hours': 24,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +83,71 @@ def _cleanup_dir(path: Path):
         shutil.rmtree(str(path), ignore_errors=True)
     except Exception:
         pass
+
+
+def _load_settings() -> dict:
+    settings = DEFAULT_SETTINGS.copy()
+    if SETTINGS_FILE.exists():
+        try:
+            saved = json.loads(SETTINGS_FILE.read_text(encoding='utf-8'))
+            if isinstance(saved, dict):
+                settings.update(saved)
+        except Exception:
+            pass
+    return settings
+
+
+def _save_settings(settings: dict) -> dict:
+    merged = DEFAULT_SETTINGS.copy()
+    merged.update(settings)
+    age = merged.get('cleanup_age_hours', DEFAULT_SETTINGS['cleanup_age_hours'])
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        age = DEFAULT_SETTINGS['cleanup_age_hours']
+    merged['cleanup_age_hours'] = max(1, age)
+    SETTINGS_FILE.write_text(json.dumps(merged, indent=2), encoding='utf-8')
+    return merged
+
+
+def _cleanup_old_files(age_hours=None) -> dict:
+    if age_hours is None:
+        age_hours = int(_load_settings().get('cleanup_age_hours', 24))
+    cutoff = time.time() - (max(1, int(age_hours)) * 3600)
+    removed = {'uploads': 0, 'results': 0}
+
+    for label, root in [('uploads', UPLOAD_DIR), ('results', RESULTS_DIR)]:
+        if not root.exists():
+            continue
+        for item in root.iterdir():
+            try:
+                if item.stat().st_mtime >= cutoff:
+                    continue
+                if item.is_dir():
+                    shutil.rmtree(str(item), ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+                removed[label] += 1
+            except Exception:
+                pass
+    return removed
+
+
+def _start_cleanup_worker():
+    global cleanup_started
+    if cleanup_started:
+        return
+    cleanup_started = True
+
+    def _worker():
+        while True:
+            try:
+                _cleanup_old_files()
+            except Exception:
+                pass
+            time.sleep(3600)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def _zip_dir(src: Path, dest: Path):
@@ -95,6 +166,28 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/api/settings', methods=['GET', 'POST'])
+def app_settings():
+    if request.method == 'GET':
+        return jsonify(_load_settings())
+    try:
+        data = request.get_json(silent=True) or {}
+        return jsonify(_save_settings(data))
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/cleanup', methods=['POST'])
+def cleanup_files():
+    try:
+        data = request.get_json(silent=True) or {}
+        age_hours = data.get('cleanup_age_hours')
+        removed = _cleanup_old_files(age_hours)
+        return jsonify({'success': True, 'removed': removed})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
 # ---------------------------------------------------------------------------
 # API – Report Merger
 # ---------------------------------------------------------------------------
@@ -107,7 +200,9 @@ def merge_reports():
         files = request.files.getlist('files')
         flatten = request.form.get('flatten', 'false').lower() == 'true'
         update_mode = request.form.get('update_mode', 'false').lower() == 'true'
-        output_name = request.form.get('output_name', 'merged').strip() or 'merged'
+        keep_update_history = request.form.get('keep_update_history', 'true').lower() == 'true'
+        raw_output_name = request.form.get('output_name', '').strip()
+        output_name = secure_filename(raw_output_name) if raw_output_name else None
         suite_name = request.form.get('suite_name', '').strip() or None
 
         if len(files) < 2:
@@ -179,7 +274,15 @@ def merge_reports():
         result_dir = RESULTS_DIR / run_id
         result_dir.mkdir(parents=True)
 
-        result = merge_xml_reports(xml_paths, result_dir, output_name, flatten, update_mode, suite_name)
+        result = merge_xml_reports(
+            xml_paths,
+            result_dir,
+            output_name,
+            flatten,
+            update_mode,
+            suite_name,
+            keep_update_history,
+        )
 
         zip_path = RESULTS_DIR / f'{run_id}.zip'
         _zip_dir(result_dir, zip_path)
@@ -193,6 +296,8 @@ def merge_reports():
             'report_url': f'/api/merge/{run_id}/report',
             'log_url': f'/api/merge/{run_id}/log',
             'update_mode': update_mode,
+            'keep_update_history': keep_update_history,
+            'stripped_history_count': result.get('stripped_history_count', 0),
         }
         if skipped_duplicates:
             resp['skipped_duplicates'] = skipped_duplicates
@@ -385,16 +490,18 @@ def view_log(run_id):
 @app.route('/api/merge/<run_id>/report')
 def view_merge_report(run_id):
     result_dir = RESULTS_DIR / run_id
-    for candidate in result_dir.glob('*_report.html'):
-        return send_file(str(candidate))
+    for candidate in [result_dir / 'report.html', *result_dir.glob('*_report.html')]:
+        if candidate.exists():
+            return send_file(str(candidate))
     return 'Report not found', 404
 
 
 @app.route('/api/merge/<run_id>/log')
 def view_merge_log(run_id):
     result_dir = RESULTS_DIR / run_id
-    for candidate in result_dir.glob('*_log.html'):
-        return send_file(str(candidate))
+    for candidate in [result_dir / 'log.html', *result_dir.glob('*_log.html')]:
+        if candidate.exists():
+            return send_file(str(candidate))
     return 'Log not found', 404
 
 
@@ -506,4 +613,5 @@ if __name__ == '__main__':
     print('=' * 55)
     print('  Press Ctrl+C to stop\n')
 
+    _start_cleanup_worker()
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

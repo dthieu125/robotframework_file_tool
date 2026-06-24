@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 import sys
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -105,13 +106,53 @@ def _repair_suite_timing(suite) -> None:
         suite.end_time = max(ends)
 
 
+def _strip_merge_history_messages(output_xml: Path) -> int:
+    """Remove Robot Framework rerun merge history from test status messages.
+
+    ``rebot --merge`` stores previous results as HTML text inside each
+    ``<test><status>`` element.  Keeping that text is useful for audit trails,
+    but when users only want the latest test state it creates repeated old
+    FAIL/PASS blocks in output.xml, log.html and report.html.
+    """
+    tree = ET.parse(str(output_xml))
+    root = tree.getroot()
+    removed = 0
+
+    for test in root.iter('test'):
+        status = test.find('status')
+        if status is None or not status.text:
+            continue
+        if 'Test has been re-executed and results merged' in status.text or 'class="merge"' in status.text:
+            status.text = None
+            removed += 1
+
+    if removed:
+        tree.write(str(output_xml), encoding='UTF-8', xml_declaration=True)
+    return removed
+
+
+def _output_paths(output_dir: Path, output_name: str | None) -> tuple[Path, Path, Path]:
+    if output_name:
+        return (
+            output_dir / f'{output_name}_output.xml',
+            output_dir / f'{output_name}_log.html',
+            output_dir / f'{output_name}_report.html',
+        )
+    return (
+        output_dir / 'output.xml',
+        output_dir / 'log.html',
+        output_dir / 'report.html',
+    )
+
+
 def merge_xml_reports(
     xml_paths: list[str],
     output_dir: Path,
-    output_name: str = 'merged',
+    output_name: str | None = 'merged',
     flatten: bool = False,
     update_mode: bool = False,
     suite_name: str | None = None,
+    keep_update_history: bool = True,
 ) -> dict:
     """
     Merge Robot Framework output XML files.
@@ -130,9 +171,7 @@ def merge_xml_reports(
 
     Returns a dict with key ``files`` – list of created file paths.
     """
-    output_xml = output_dir / f'{output_name}_output.xml'
-    output_log = output_dir / f'{output_name}_log.html'
-    output_report = output_dir / f'{output_name}_report.html'
+    output_xml, output_log, output_report = _output_paths(output_dir, output_name)
 
     run_kwargs: dict = dict(
         capture_output=True,
@@ -158,12 +197,13 @@ def merge_xml_reports(
             sys.executable, '-m', 'robot.rebot',
             '--merge',
             '--outputdir', str(output_dir),
-            '--name', effective_name,
             '--output', output_xml.name,
             '--log', 'NONE',
             '--report', 'NONE',
             *xml_paths,
         ]
+        if effective_name:
+            rebot_cmd[6:6] = ['--name', effective_name]
 
         proc = subprocess.run(rebot_cmd, **run_kwargs)
 
@@ -176,6 +216,13 @@ def merge_xml_reports(
 
         if not output_xml.exists():
             raise RuntimeError('rebot --merge produced no files. Check the input XML format.')
+
+        stripped_history_count = 0
+        if not keep_update_history:
+            try:
+                stripped_history_count = _strip_merge_history_messages(output_xml)
+            except Exception as exc:
+                raise RuntimeError(f'Failed to remove update history from merged XML: {exc}') from exc
 
         # ------------------------------------------------------------------ #
         # Repair missing suite-level timing then re-save the merged XML       #
@@ -198,12 +245,13 @@ def merge_xml_reports(
         regen_cmd = [
             sys.executable, '-m', 'robot.rebot',
             '--outputdir', str(output_dir),
-            '--name', effective_name,
             '--log', output_log.name,
             '--report', output_report.name,
             '--output', 'NONE',
             str(output_xml),
         ]
+        if effective_name:
+            regen_cmd[5:5] = ['--name', effective_name]
         proc = subprocess.run(regen_cmd, **run_kwargs)
         if proc.returncode >= 250:
             detail = (proc.stderr or '').strip() or (proc.stdout or '').strip()
@@ -215,7 +263,7 @@ def merge_xml_reports(
         created = [str(p) for p in [output_xml, output_log, output_report] if p.exists()]
         if not created:
             raise RuntimeError('rebot --merge produced no files. Check the input XML format.')
-        return {'files': created}
+        return {'files': created, 'stripped_history_count': stripped_history_count}
 
     # ---------------------------------------------------------------------- #
     # Combine mode (default)                                                  #
@@ -248,7 +296,7 @@ def merge_xml_reports(
     elif suites_to_process:
         merged.suite.name = suites_to_process[0].name
     else:
-        merged.suite.name = output_name
+        merged.suite.name = output_name or 'Merged Results'
 
     combined_metadata: dict = {}
     all_tests: list = []

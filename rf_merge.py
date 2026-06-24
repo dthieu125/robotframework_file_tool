@@ -13,13 +13,17 @@ Requirements:
 ==============================================================================
 -o DIR / --output-dir   | Output directory (default: ./merged_results/)
 ------------------------------------------------------------------------------
--n NAME / --name        | Suite name and file prefix (default: merged)
+-n NAME / --name        | File prefix. Leave empty/default for output.xml,
+                        | report.html, log.html
 ------------------------------------------------------------------------------
 --flatten               | Flatten all test cases to a single level
 ------------------------------------------------------------------------------
 --update                | Update mode: tests from later files replace tests
                         | with the same name in earlier files.  Use this to
                         | fold a re-run's PASS result back into an old report.
+------------------------------------------------------------------------------
+--latest-only           | In update mode, remove old result history and keep
+                        | only the latest status in output.xml/log/report
 ------------------------------------------------------------------------------
 --xml-only              | Only produce merged output.xml, skip HTML generation
 ------------------------------------------------------------------------------
@@ -35,8 +39,11 @@ Examples:
     # Basic merge (output goes to ./merged_results/)
     python rf_merge.py run1/output.xml run2/output.xml
 
-    # Custom output directory and name
+    # Custom output directory and file prefix
     python rf_merge.py -o reports -n sprint42 run1/output.xml run2/output.xml
+
+    # Default Robot Framework filenames: output.xml, report.html, log.html
+    python rf_merge.py -o reports run1/output.xml run2/output.xml
 
     # Flatten all test cases to a single level
     python rf_merge.py --flatten *.xml
@@ -46,6 +53,9 @@ Examples:
 
     # Update mode: replace old FAIL results with new PASS results
     python rf_merge.py --update old_results.xml new_rerun.xml
+
+    # Update mode, but do not keep repeated old FAIL/PASS history blocks
+    python rf_merge.py --update --latest-only old_results.xml new_rerun.xml
 """
 
 from __future__ import annotations
@@ -171,24 +181,57 @@ def _detect_suite_names(xml_paths: list[str]) -> list[str]:
     return names
 
 
+def _output_paths(output_dir: Path, output_name: str | None) -> tuple[Path, Path, Path]:
+    """Return output.xml/log.html/report.html paths for default or prefixed names."""
+    if output_name:
+        return (
+            output_dir / f'{output_name}_output.xml',
+            output_dir / f'{output_name}_log.html',
+            output_dir / f'{output_name}_report.html',
+        )
+    return (
+        output_dir / 'output.xml',
+        output_dir / 'log.html',
+        output_dir / 'report.html',
+    )
+
+
+def _strip_merge_history_messages(output_xml: Path) -> int:
+    """Remove Robot Framework rerun merge history from test status messages."""
+    tree = _ET.parse(str(output_xml))
+    root = tree.getroot()
+    removed = 0
+
+    for test in root.iter('test'):
+        status = test.find('status')
+        if status is None or not status.text:
+            continue
+        if 'Test has been re-executed and results merged' in status.text or 'class="merge"' in status.text:
+            status.text = None
+            removed += 1
+
+    if removed:
+        tree.write(str(output_xml), encoding='UTF-8', xml_declaration=True)
+    return removed
+
+
 def merge_xml_reports(
     xml_paths: list[str],
     output_dir: Path,
-    output_name: str = 'merged',
+    output_name: str | None = None,
     flatten: bool = False,
     xml_only: bool = False,
     update_mode: bool = False,
     suite_name: str | None = None,
-) -> list[Path]:
+    keep_update_history: bool = True,
+) -> tuple[list[Path], int]:
     """Merge Robot Framework output XML files and optionally generate HTML.
 
     When update_mode is True, tests from later files replace same-named tests
     in earlier files (uses rebot --merge).  Useful for folding re-run PASS
     results back into an existing report.
     """
-    output_xml = output_dir / f'{output_name}_output.xml'
-    output_log = output_dir / f'{output_name}_log.html'
-    output_report = output_dir / f'{output_name}_report.html'
+    output_xml, output_log, output_report = _output_paths(output_dir, output_name)
 
     run_kwargs: dict = dict(
         capture_output=True, text=True,
@@ -214,11 +257,12 @@ def merge_xml_reports(
             sys.executable, '-m', 'robot.rebot',
             '--merge',
             '--outputdir', str(output_dir),
-            '--name', effective_name,
             '--output', output_xml.name,
             '--log', 'NONE',
             '--report', 'NONE',
         ]
+        if effective_name:
+            rebot_cmd += ['--name', effective_name]
         rebot_cmd += xml_paths
 
         proc = subprocess.run(rebot_cmd, **run_kwargs)
@@ -230,7 +274,16 @@ def merge_xml_reports(
 
         created: list[Path] = []
 
+        stripped_history_count = 0
+
         if output_xml.exists():
+            if not keep_update_history:
+                try:
+                    stripped_history_count = _strip_merge_history_messages(output_xml)
+                except Exception as exc:
+                    print(f"Warning: failed to remove update history: {exc}",
+                          file=sys.stderr)
+
             try:
                 from robot.api import ExecutionResult
                 merged = ExecutionResult(str(output_xml))
@@ -250,12 +303,13 @@ def merge_xml_reports(
                 regen_cmd = [
                     sys.executable, '-m', 'robot.rebot',
                     '--outputdir', str(output_dir),
-                    '--name', effective_name,
                     '--log', output_log.name,
                     '--report', output_report.name,
                     '--output', 'NONE',
                     str(output_xml),
                 ]
+                if effective_name:
+                    regen_cmd[5:5] = ['--name', effective_name]
                 proc = subprocess.run(regen_cmd, **run_kwargs)
                 if proc.returncode >= 250:
                     detail = (proc.stderr or '').strip() or (proc.stdout or '').strip()
@@ -269,7 +323,7 @@ def merge_xml_reports(
                     if output_report.exists():
                         created.append(output_report)
 
-        return created
+        return created, stripped_history_count
 
     # ---------------------------------------------------------------------- #
     # Combine mode (default)                                                  #
@@ -294,7 +348,7 @@ def merge_xml_reports(
     elif suites_to_process:
         merged.suite.name = suites_to_process[0].name
     else:
-        merged.suite.name = output_name
+        merged.suite.name = output_name or 'Merged Results'
 
     combined_metadata: dict = {}
     all_tests: list = []
@@ -377,7 +431,7 @@ def merge_xml_reports(
             if output_report.exists():
                 created.append(output_report)
 
-    return created
+    return created, 0
 
 
 def main():
@@ -389,6 +443,7 @@ examples:
   %(prog)s run1/output.xml run2/output.xml
   %(prog)s -o results -n sprint42 *.xml
   %(prog)s --flatten --xml-only *.xml
+  %(prog)s --update --latest-only old.xml rerun.xml
         """,
     )
     parser.add_argument(
@@ -400,8 +455,11 @@ examples:
         help='output directory (default: ./merged_results/)',
     )
     parser.add_argument(
-        '-n', '--name', default='merged',
-        help='file prefix for the generated output files (default: merged)',
+        '-n', '--name', default='',
+        help=(
+            'file prefix for generated output files. Leave empty/default to '
+            'create output.xml, log.html and report.html'
+        ),
     )
     parser.add_argument(
         '--suite-name', default=None, metavar='NAME',
@@ -424,6 +482,13 @@ examples:
             'update mode: tests from later files replace same-named tests in '
             'earlier files (uses rebot --merge).  Useful for folding a re-run '
             'PASS result back into an existing report.'
+        ),
+    )
+    parser.add_argument(
+        '--latest-only', action='store_true',
+        help=(
+            'with --update, remove Robot Framework old result history and keep '
+            'only the latest status in output.xml, log.html and report.html'
         ),
     )
     parser.add_argument(
@@ -490,17 +555,25 @@ examples:
         print(f"  + {p}")
     if resolved_suite_name:
         print(f"  Suite name: {resolved_suite_name}")
+    if args.update:
+        history_label = 'latest status only' if args.latest_only else 'keep old result history'
+        print(f"  Update history: {history_label}")
+    if args.name:
+        print(f"  Output prefix: {args.name}")
+    else:
+        print("  Output files: output.xml, log.html, report.html")
     print()
 
     try:
-        created = merge_xml_reports(
+        created, stripped_history_count = merge_xml_reports(
             xml_paths,
             args.output_dir,
-            args.name,
+            args.name or None,
             args.flatten,
             args.xml_only,
             args.update,
             resolved_suite_name,
+            not args.latest_only,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -511,6 +584,8 @@ examples:
     for f in created:
         size_kb = f.stat().st_size / 1024
         print(f"  {f}  ({size_kb:.1f} KB)")
+    if args.update and args.latest_only:
+        print(f"Removed old result history from {stripped_history_count} updated test(s).")
     print()
     print(f"Output directory: {args.output_dir.resolve()}")
 

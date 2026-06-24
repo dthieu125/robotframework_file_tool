@@ -144,6 +144,12 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   fileInput.setAttribute('multiple', '');
 
   let mergerFiles = [];
+  const MERGER_SETTINGS_KEY = 'rf-merger-settings';
+  const mergerSettings = {
+    updateHistory: 'keep',
+    clearInputsAfterMerge: false,
+    cleanupAgeHours: 24,
+  };
 
   /**
    * Per-file metadata cache.  Each File is mapped to
@@ -151,6 +157,98 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
    * so we only have to read each file once.
    */
   const fileMeta = new WeakMap();
+
+  function readMergerSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(MERGER_SETTINGS_KEY) || '{}');
+      Object.assign(mergerSettings, saved);
+    } catch { /* keep defaults */ }
+  }
+
+  function applyMergerSettingsToUi() {
+    const historyEl = document.querySelector(`input[name="merger-history-setting"][value="${mergerSettings.updateHistory}"]`);
+    if (historyEl) historyEl.checked = true;
+    document.getElementById('merger-clear-inputs-after-merge').checked = !!mergerSettings.clearInputsAfterMerge;
+    document.getElementById('cleanup-age-hours').value = mergerSettings.cleanupAgeHours || 24;
+  }
+
+  function collectMergerSettingsFromUi() {
+    mergerSettings.updateHistory =
+      document.querySelector('input[name="merger-history-setting"]:checked')?.value || 'keep';
+    mergerSettings.clearInputsAfterMerge =
+      document.getElementById('merger-clear-inputs-after-merge').checked;
+    mergerSettings.cleanupAgeHours =
+      Math.max(1, parseInt(document.getElementById('cleanup-age-hours').value, 10) || 24);
+    localStorage.setItem(MERGER_SETTINGS_KEY, JSON.stringify(mergerSettings));
+  }
+
+  async function loadServerSettings() {
+    readMergerSettings();
+    try {
+      const res = await fetch('/api/settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.cleanup_age_hours) mergerSettings.cleanupAgeHours = data.cleanup_age_hours;
+      }
+    } catch { /* settings are optional */ }
+    applyMergerSettingsToUi();
+  }
+
+  async function saveServerSettings() {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cleanup_age_hours: mergerSettings.cleanupAgeHours }),
+    });
+  }
+
+  function clearMergerInputs() {
+    mergerFiles = [];
+    document.getElementById('merger-file-input').value = '';
+    document.getElementById('merger-file-list').innerHTML = '';
+    document.getElementById('merger-suite-name-select').innerHTML = '<option value="__auto__">Auto-detect from files</option>';
+    document.getElementById('merger-suite-name-custom').value = '';
+    document.getElementById('merger-suite-name-custom').style.display = 'none';
+  }
+
+  loadServerSettings();
+
+  document.getElementById('merger-settings-save-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('merger-settings-save-btn');
+    collectMergerSettingsFromUi();
+    setLoading(btn, true, 'Saving...');
+    try {
+      await saveServerSettings();
+      showToast('Report merger settings saved', 'success');
+      bootstrap.Modal.getInstance(document.getElementById('merger-settings-modal'))?.hide();
+    } catch (err) {
+      showToast(err.message || 'Failed to save settings', 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
+  document.getElementById('cleanup-now-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('cleanup-now-btn');
+    collectMergerSettingsFromUi();
+    setLoading(btn, true, 'Cleaning...');
+    try {
+      await saveServerSettings();
+      const res = await fetch('/api/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cleanup_age_hours: mergerSettings.cleanupAgeHours }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Cleanup failed');
+      const removed = data.removed || {};
+      showToast(`Cleaned ${removed.uploads || 0} upload item(s) and ${removed.results || 0} result item(s)`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
 
   // Show/hide the Update mode hint when mode radio changes
   document.querySelectorAll('input[name="merger-mode"]').forEach(radio => {
@@ -346,14 +444,16 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       return;
     }
     const isUpdateMode = document.querySelector('input[name="merger-mode"]:checked')?.value === 'update';
+    collectMergerSettingsFromUi();
     const btn = document.getElementById('merger-btn');
     setLoading(btn, true, isUpdateMode ? 'Updating...' : 'Merging...');
 
     const fd = new FormData();
     mergerFiles.forEach(f => fd.append('files', f));
     fd.append('flatten', document.getElementById('merger-flatten').checked);
-    fd.append('output_name', document.getElementById('merger-output-name').value.trim() || 'merged');
+    fd.append('output_name', document.getElementById('merger-output-name').value.trim());
     fd.append('update_mode', isUpdateMode);
+    fd.append('keep_update_history', mergerSettings.updateHistory === 'keep');
 
     const suiteNameSelect = document.getElementById('merger-suite-name-select');
     let suiteName = '';
@@ -399,10 +499,13 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
         </div>`).join('');
 
       if (data.update_mode) {
+        const historyText = data.keep_update_history
+          ? 'Old result history has been kept beside the newest status.'
+          : `Old result history has been removed from ${data.stripped_history_count || 0} updated test(s).`;
         filesHtml += `
           <div class="alert alert-info mt-2 mb-0 py-2 px-3" style="font-size:13px">
             <i class="fa-solid fa-rotate me-1"></i>
-            <strong>Update mode:</strong> Tests from later files have replaced same-named tests in earlier files.
+            <strong>Update mode:</strong> Tests from later files have replaced same-named tests in earlier files. ${historyText}
           </div>`;
       }
 
@@ -436,6 +539,9 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
         showToast(`Update complete! ${fileCount} file(s) processed — matching tests replaced.`, 'success');
       } else {
         showToast(`Successfully merged ${fileCount} file(s)!`, 'success');
+      }
+      if (mergerSettings.clearInputsAfterMerge) {
+        clearMergerInputs();
       }
     } catch (err) {
       showToast(err.message, 'error');

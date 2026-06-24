@@ -60,8 +60,15 @@
   <!-- ─── PANEL: REPORT MERGER ─────────────────────────────────────── -->
   <section id="panel-merger" class="panel active">
     <div class="panel-header">
-      <h2><i class="fa-solid fa-code-merge me-2"></i>Report Merger</h2>
-      <p class="text-muted">Merge multiple Robot Framework <code>output.xml</code> files into a single report. Use <strong>Update</strong> mode to replace old FAIL results with new PASS results from a re-run.</p>
+      <div class="d-flex align-items-start gap-3">
+        <div>
+          <h2><i class="fa-solid fa-code-merge me-2"></i>Report Merger</h2>
+          <p class="text-muted">Merge multiple Robot Framework <code>output.xml</code> files into a single report. Use <strong>Update</strong> mode to replace old FAIL results with new PASS results from a re-run.</p>
+        </div>
+        <button class="btn btn-outline-secondary ms-auto" id="merger-settings-btn" data-bs-toggle="modal" data-bs-target="#merger-settings-modal" title="Report merger settings">
+          <i class="fa-solid fa-gear"></i>
+        </button>
+      </div>
     </div>
 
     <div class="row g-4">
@@ -104,8 +111,8 @@
 
             <div class="mb-3">
               <label class="form-label">Output name</label>
-              <input type="text" class="form-control" id="merger-output-name" value="merged" placeholder="merged" />
-              <div class="form-text">Prefix for the generated result files (e.g. <code>sprint42</code> → <code>sprint42_output.xml</code>)</div>
+              <input type="text" class="form-control" id="merger-output-name" value="" placeholder="Leave empty for default files" />
+              <div class="form-text">Leave empty to generate <code>output.xml</code>, <code>report.html</code>, and <code>log.html</code>. Enter a name to use it as a prefix.</div>
             </div>
 
             <div class="mb-3">
@@ -650,6 +657,58 @@
 <!-- ===================================================================
      MODALS
 =================================================================== -->
+
+<!-- Report merger settings -->
+<div class="modal fade" id="merger-settings-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-gear me-2"></i>Report Merger Settings</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-group">
+          <div class="settings-group-title">Update / Replace</div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="merger-history-setting" id="merger-history-keep" value="keep" checked />
+            <label class="form-check-label" for="merger-history-keep">Keep old result history beside the newest result</label>
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="radio" name="merger-history-setting" id="merger-history-latest" value="latest" />
+            <label class="form-check-label" for="merger-history-latest">Only keep latest status in output.xml, report.html and log.html</label>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="settings-group-title">After Merge</div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="merger-clear-inputs-after-merge" />
+            <label class="form-check-label" for="merger-clear-inputs-after-merge">Clear all selected input files after merge completes</label>
+          </div>
+        </div>
+
+        <div class="settings-group mb-0">
+          <div class="settings-group-title">File Cleanup</div>
+          <label class="form-label" for="cleanup-age-hours">Auto-delete uploaded and downloaded files older than</label>
+          <div class="input-group">
+            <input type="number" min="1" step="1" class="form-control" id="cleanup-age-hours" value="24" />
+            <span class="input-group-text">hours</span>
+          </div>
+          <div class="form-text">The server checks this periodically while the app is running.</div>
+          <button class="btn btn-outline-secondary mt-3" id="cleanup-now-btn">
+            <i class="fa-solid fa-broom me-1"></i>Clean old files now
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-primary" id="merger-settings-save-btn">
+          <i class="fa-solid fa-floppy-disk me-1"></i>Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Detail modal for test/keyword -->
 <div class="modal fade" id="detail-modal" tabindex="-1">
