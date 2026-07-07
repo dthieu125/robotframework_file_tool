@@ -157,6 +157,9 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
    * so we only have to read each file once.
    */
   const fileMeta = new WeakMap();
+  let updateCandidates = [];
+  let selectedUpdateTests = new Set();
+  let updateCandidatesDirty = true;
 
   function readMergerSettings() {
     try {
@@ -204,11 +207,15 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 
   function clearMergerInputs() {
     mergerFiles = [];
+    updateCandidates = [];
+    selectedUpdateTests = new Set();
+    updateCandidatesDirty = true;
     document.getElementById('merger-file-input').value = '';
     document.getElementById('merger-file-list').innerHTML = '';
     document.getElementById('merger-suite-name-select').innerHTML = '<option value="__auto__">Auto-detect from files</option>';
     document.getElementById('merger-suite-name-custom').value = '';
     document.getElementById('merger-suite-name-custom').style.display = 'none';
+    renderUpdateCandidates();
   }
 
   loadServerSettings();
@@ -254,8 +261,145 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   document.querySelectorAll('input[name="merger-mode"]').forEach(radio => {
     radio.addEventListener('change', () => {
       const hint = document.getElementById('merger-update-hint');
-      hint.style.display = radio.value === 'update' && radio.checked ? '' : 'none';
+      const scope = document.getElementById('merger-update-scope');
+      const show = radio.value === 'update' && radio.checked;
+      hint.style.display = show ? '' : 'none';
+      scope.style.display = show ? '' : 'none';
     });
+  });
+
+  document.querySelectorAll('input[name="merger-update-scope"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const picker = document.getElementById('merger-update-picker');
+      picker.style.display = radio.value === 'selected' && radio.checked ? '' : 'none';
+    });
+  });
+
+  function markUpdateCandidatesDirty() {
+    updateCandidates = [];
+    selectedUpdateTests = new Set();
+    updateCandidatesDirty = true;
+    renderUpdateCandidates();
+  }
+
+  function updateSelectedCount() {
+    document.getElementById('merger-selected-count').textContent =
+      `${selectedUpdateTests.size} selected`;
+  }
+
+  function renderUpdateCandidates() {
+    const container = document.getElementById('merger-update-candidate-list');
+    const selectAllBtn = document.getElementById('merger-select-all-candidates');
+    const clearBtn = document.getElementById('merger-clear-candidates');
+    const searchEl = document.getElementById('merger-update-search');
+    const search = (searchEl?.value || '').trim().toLowerCase();
+
+    if (!container) return;
+
+    if (updateCandidatesDirty) {
+      container.innerHTML = '<div class="text-muted small">Load the list after selecting or reordering files.</div>';
+      selectAllBtn.style.display = 'none';
+      clearBtn.style.display = 'none';
+      updateSelectedCount();
+      return;
+    }
+
+    if (!updateCandidates.length) {
+      container.innerHTML = '<div class="text-muted small">No test cases can be overwritten. A candidate must exist in both an earlier and a later file.</div>';
+      selectAllBtn.style.display = 'none';
+      clearBtn.style.display = 'none';
+      updateSelectedCount();
+      return;
+    }
+
+    const visible = updateCandidates.filter(item => {
+      if (!search) return true;
+      const haystack = [
+        item.name,
+        ...(item.earlier || []).map(o => o.file_name),
+        ...(item.later || []).map(o => o.file_name),
+      ].join(' ').toLowerCase();
+      return haystack.includes(search);
+    });
+
+    selectAllBtn.style.display = '';
+    clearBtn.style.display = '';
+
+    if (!visible.length) {
+      container.innerHTML = '<div class="text-muted small">No matching test cases.</div>';
+      updateSelectedCount();
+      return;
+    }
+
+    container.innerHTML = visible.map(item => {
+      const latest = (item.later || [])[item.later.length - 1] || {};
+      const previous = (item.earlier || [])[0] || {};
+      const checked = selectedUpdateTests.has(item.name) ? 'checked' : '';
+      const statusBadge = latest.status
+        ? `<span class="badge bg-secondary ms-2">${escapeHtml(latest.status)}</span>`
+        : '';
+      return `
+        <label class="update-candidate-row">
+          <input class="form-check-input merger-update-candidate-check" type="checkbox" value="${escapeHtml(item.name)}" ${checked} />
+          <span class="update-candidate-main">
+            <span class="update-candidate-name">${escapeHtml(item.name)}${statusBadge}</span>
+            <span class="update-candidate-meta">
+              ${escapeHtml(previous.file_name || 'Earlier file')} &rarr; ${escapeHtml(latest.file_name || 'Later file')}
+            </span>
+          </span>
+        </label>`;
+    }).join('');
+
+    container.querySelectorAll('.merger-update-candidate-check').forEach(chk => {
+      chk.addEventListener('change', () => {
+        if (chk.checked) selectedUpdateTests.add(chk.value);
+        else selectedUpdateTests.delete(chk.value);
+        updateSelectedCount();
+      });
+    });
+    updateSelectedCount();
+  }
+
+  async function loadUpdateCandidates() {
+    if (mergerFiles.length < 2) {
+      showToast('Please select at least 2 output.xml files first', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('merger-load-candidates-btn');
+    const fd = new FormData();
+    mergerFiles.forEach(f => fd.append('files', f));
+    setLoading(btn, true, 'Loading...');
+    try {
+      const res = await fetch('/api/merge/update-candidates', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to load test cases');
+      updateCandidates = data.candidates || [];
+      selectedUpdateTests = new Set(updateCandidates.map(item => item.name));
+      updateCandidatesDirty = false;
+      renderUpdateCandidates();
+      showToast(`Loaded ${updateCandidates.length} overwrite candidate(s)`, updateCandidates.length ? 'success' : 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  document.getElementById('merger-load-candidates-btn').addEventListener('click', e => {
+    e.preventDefault();
+    loadUpdateCandidates();
+  });
+  document.getElementById('merger-update-search').addEventListener('input', renderUpdateCandidates);
+  document.getElementById('merger-select-all-candidates').addEventListener('click', e => {
+    e.preventDefault();
+    updateCandidates.forEach(item => selectedUpdateTests.add(item.name));
+    renderUpdateCandidates();
+  });
+  document.getElementById('merger-clear-candidates').addEventListener('click', e => {
+    e.preventDefault();
+    selectedUpdateTests = new Set();
+    renderUpdateCandidates();
   });
 
   // --- Suite metadata helpers --------------------------------------------
@@ -420,6 +564,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     container.querySelectorAll('.merger-file-del-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         mergerFiles.splice(parseInt(btn.dataset.idx), 1);
+        markUpdateCandidatesDirty();
         renderFileList();
         updateSuiteNameDropdown();
       });
@@ -430,6 +575,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     const xmlFiles = files.filter(f => f.name.endsWith('.xml'));
     if (!xmlFiles.length) { showToast('Only .xml files are accepted', 'warning'); return; }
     mergerFiles = [...mergerFiles, ...xmlFiles];
+    markUpdateCandidatesDirty();
     renderFileList();                                  // immediate feedback
     updateSuiteNameDropdown();
     // Read every newly added file in parallel, then re-render so the
@@ -444,6 +590,17 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       return;
     }
     const isUpdateMode = document.querySelector('input[name="merger-mode"]:checked')?.value === 'update';
+    const updateScope = document.querySelector('input[name="merger-update-scope"]:checked')?.value || 'all';
+    if (isUpdateMode && updateScope === 'selected') {
+      if (updateCandidatesDirty) {
+        showToast('Please load the test case list before merging selected updates', 'warning');
+        return;
+      }
+      if (selectedUpdateTests.size === 0) {
+        showToast('Please select at least one test case to update', 'warning');
+        return;
+      }
+    }
     collectMergerSettingsFromUi();
     const btn = document.getElementById('merger-btn');
     setLoading(btn, true, isUpdateMode ? 'Updating...' : 'Merging...');
@@ -453,7 +610,11 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     fd.append('flatten', document.getElementById('merger-flatten').checked);
     fd.append('output_name', document.getElementById('merger-output-name').value.trim());
     fd.append('update_mode', isUpdateMode);
+    fd.append('update_scope', updateScope);
     fd.append('keep_update_history', mergerSettings.updateHistory === 'keep');
+    if (isUpdateMode && updateScope === 'selected') {
+      fd.append('selected_update_tests', JSON.stringify([...selectedUpdateTests]));
+    }
 
     const suiteNameSelect = document.getElementById('merger-suite-name-select');
     let suiteName = '';
@@ -499,13 +660,16 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
         </div>`).join('');
 
       if (data.update_mode) {
+        const scopeText = data.update_scope === 'selected'
+          ? `Selected update replaced ${data.selective_update_count || selectedUpdateTests.size} test result(s).`
+          : 'Tests from later files have replaced same-named tests in earlier files.';
         const historyText = data.keep_update_history
           ? 'Old result history has been kept beside the newest status.'
           : `Old result history has been removed from ${data.stripped_history_count || 0} updated test(s).`;
         filesHtml += `
           <div class="alert alert-info mt-2 mb-0 py-2 px-3" style="font-size:13px">
             <i class="fa-solid fa-rotate me-1"></i>
-            <strong>Update mode:</strong> Tests from later files have replaced same-named tests in earlier files. ${historyText}
+            <strong>Update mode:</strong> ${scopeText} ${historyText}
           </div>`;
       }
 
@@ -536,7 +700,10 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 
       const fileCount = data.unique_file_count || mergerFiles.length;
       if (data.update_mode) {
-        showToast(`Update complete! ${fileCount} file(s) processed — matching tests replaced.`, 'success');
+        const msg = data.update_scope === 'selected'
+          ? `Update complete! ${data.selective_update_count || selectedUpdateTests.size} selected test result(s) replaced.`
+          : `Update complete! ${fileCount} file(s) processed — matching tests replaced.`;
+        showToast(msg, 'success');
       } else {
         showToast(`Successfully merged ${fileCount} file(s)!`, 'success');
       }

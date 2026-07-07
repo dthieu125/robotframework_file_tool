@@ -56,6 +56,11 @@ Examples:
 
     # Update mode, but do not keep repeated old FAIL/PASS history blocks
     python rf_merge.py --update --latest-only old_results.xml new_rerun.xml
+
+    # Update only selected test cases; old --update commands still update all
+    python rf_merge.py --update --test "Login succeeds" --test "Checkout" old_results.xml new_rerun.xml
+    python rf_merge.py --update --tests "Login succeeds,Checkout" old_results.xml new_rerun.xml
+    python rf_merge.py --update --tests-file selected_tests.txt old_results.xml new_rerun.xml
 """
 
 from __future__ import annotations
@@ -65,6 +70,7 @@ import datetime as _dt
 import hashlib
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as _ET
 from pathlib import Path
 
@@ -215,6 +221,154 @@ def _strip_merge_history_messages(output_xml: Path) -> int:
     return removed
 
 
+def _child_elements(elem: _ET.Element, tag_name: str) -> list[_ET.Element]:
+    """Return direct children whose tag matches *tag_name* without namespaces."""
+    return [child for child in list(elem) if child.tag.rsplit('}', 1)[-1] == tag_name]
+
+
+def _find_status(test: _ET.Element) -> _ET.Element | None:
+    for child in list(test):
+        if child.tag.rsplit('}', 1)[-1] == 'status':
+            return child
+    return None
+
+
+def _iter_suite_tests(suite: _ET.Element, suite_path: tuple[str, ...] = ()):
+    suite_name = suite.get('name', '')
+    current_path = (*suite_path, suite_name) if suite_name else suite_path
+
+    for test in _child_elements(suite, 'test'):
+        status = _find_status(test)
+        yield {
+            'name': test.get('name', ''),
+            'suite': ' / '.join(current_path),
+            'status': status.get('status', '') if status is not None else '',
+        }
+
+    for sub_suite in _child_elements(suite, 'suite'):
+        yield from _iter_suite_tests(sub_suite, current_path)
+
+
+def _root_suite(root: _ET.Element) -> _ET.Element | None:
+    if root.tag.rsplit('}', 1)[-1] == 'suite':
+        return root
+    for child in list(root):
+        if child.tag.rsplit('}', 1)[-1] == 'suite':
+            return child
+    return None
+
+
+def _read_test_occurrences(xml_path: str, file_index: int, file_name: str) -> list[dict]:
+    tree = _ET.parse(xml_path)
+    suite = _root_suite(tree.getroot())
+    if suite is None:
+        return []
+
+    occurrences = []
+    for item in _iter_suite_tests(suite):
+        if not item['name']:
+            continue
+        occurrences.append({
+            **item,
+            'file_index': file_index,
+            'file_name': file_name,
+        })
+    return occurrences
+
+
+def list_update_candidates(xml_paths: list[str], file_names: list[str] | None = None) -> list[dict]:
+    """List test names that can be replaced by a later file in update mode."""
+    if file_names is None:
+        file_names = [Path(p).name for p in xml_paths]
+
+    seen_by_name: dict[str, list[dict]] = {}
+    candidates: dict[str, dict] = {}
+
+    for idx, xml_path in enumerate(xml_paths):
+        file_name = file_names[idx] if idx < len(file_names) else Path(xml_path).name
+        for occ in _read_test_occurrences(xml_path, idx, file_name):
+            name = occ['name']
+            previous = seen_by_name.get(name, [])
+            if previous:
+                candidate = candidates.setdefault(name, {
+                    'name': name,
+                    'earlier': [],
+                    'later': [],
+                })
+                for prev in previous:
+                    if not any(
+                        p['file_index'] == prev['file_index'] and p['suite'] == prev['suite']
+                        for p in candidate['earlier']
+                    ):
+                        candidate['earlier'].append(prev)
+                candidate['later'].append(occ)
+            seen_by_name.setdefault(name, []).append(occ)
+
+    return sorted(candidates.values(), key=lambda item: item['name'].lower())
+
+
+def _suite_has_tests(suite: _ET.Element) -> bool:
+    if _child_elements(suite, 'test'):
+        return True
+    return any(_suite_has_tests(sub) for sub in _child_elements(suite, 'suite'))
+
+
+def _filter_suite_for_selected_tests(
+    suite: _ET.Element,
+    selected_names: set[str],
+    eligible_names: set[str],
+) -> int:
+    kept = 0
+
+    for child in list(suite):
+        tag = child.tag.rsplit('}', 1)[-1]
+        if tag == 'test':
+            name = child.get('name', '')
+            if name in selected_names and name in eligible_names:
+                kept += 1
+            else:
+                suite.remove(child)
+        elif tag == 'suite':
+            kept += _filter_suite_for_selected_tests(child, selected_names, eligible_names)
+            if not _suite_has_tests(child):
+                suite.remove(child)
+
+    return kept
+
+
+def _prepare_selective_update_paths(
+    xml_paths: list[str],
+    selected_names: set[str],
+    temp_dir: Path,
+) -> tuple[list[str], int]:
+    """Keep the first XML intact and filter later XMLs to selected update tests."""
+    prepared = [xml_paths[0]]
+    seen_names: set[str] = set()
+    kept_total = 0
+
+    for idx, xml_path in enumerate(xml_paths):
+        original_occurrences = _read_test_occurrences(xml_path, idx, Path(xml_path).name)
+        current_names = {occ['name'] for occ in original_occurrences}
+
+        if idx == 0:
+            seen_names.update(current_names)
+            continue
+
+        tree = _ET.parse(xml_path)
+        suite = _root_suite(tree.getroot())
+        if suite is not None:
+            kept = _filter_suite_for_selected_tests(suite, selected_names, seen_names)
+            if kept:
+                filtered_path = temp_dir / f'selected_update_{idx}.xml'
+                tree.write(str(filtered_path), encoding='UTF-8', xml_declaration=True)
+                prepared.append(str(filtered_path))
+                kept_total += kept
+
+        seen_names.update(current_names)
+
+    return prepared, kept_total
+
+
 def merge_xml_reports(
     xml_paths: list[str],
     output_dir: Path,
@@ -224,6 +378,7 @@ def merge_xml_reports(
     update_mode: bool = False,
     suite_name: str | None = None,
     keep_update_history: bool = True,
+    selected_update_tests: list[str] | None = None,
 ) -> tuple[list[Path], int]:
     """Merge Robot Framework output XML files and optionally generate HTML.
 
@@ -253,6 +408,23 @@ def merge_xml_reports(
         #   3. running rebot a second time on the repaired XML to generate
         #      log.html and report.html (unless --xml-only was requested).
         effective_name = suite_name or output_name
+        temp_ctx = None
+        merge_paths = xml_paths
+
+        if selected_update_tests is not None:
+            selected_names = {name for name in selected_update_tests if name}
+            if not selected_names:
+                raise ValueError('No test cases were selected for selective update.')
+            temp_ctx = tempfile.TemporaryDirectory(prefix='rf_selective_update_')
+            merge_paths, selective_count = _prepare_selective_update_paths(
+                xml_paths,
+                selected_names,
+                Path(temp_ctx.name),
+            )
+            if len(merge_paths) < 2 or selective_count == 0:
+                temp_ctx.cleanup()
+                raise ValueError('None of the selected test cases can replace an earlier result.')
+
         rebot_cmd = [
             sys.executable, '-m', 'robot.rebot',
             '--merge',
@@ -263,9 +435,13 @@ def merge_xml_reports(
         ]
         if effective_name:
             rebot_cmd += ['--name', effective_name]
-        rebot_cmd += xml_paths
+        rebot_cmd += merge_paths
 
-        proc = subprocess.run(rebot_cmd, **run_kwargs)
+        try:
+            proc = subprocess.run(rebot_cmd, **run_kwargs)
+        finally:
+            if temp_ctx is not None:
+                temp_ctx.cleanup()
         if proc.returncode >= 250:
             detail = (proc.stderr or '').strip() or (proc.stdout or '').strip()
             print(f"Warning: rebot --merge failed (exit {proc.returncode})", file=sys.stderr)
@@ -444,6 +620,10 @@ examples:
   %(prog)s -o results -n sprint42 *.xml
   %(prog)s --flatten --xml-only *.xml
   %(prog)s --update --latest-only old.xml rerun.xml
+  %(prog)s --update --test "Login succeeds" --test "Checkout" old.xml rerun.xml
+  %(prog)s --update --tests "Login succeeds,Checkout" old.xml rerun.xml
+  %(prog)s --update --tests-file selected_tests.txt old.xml rerun.xml
+  %(prog)s --update --list-update-candidates old.xml rerun.xml
         """,
     )
     parser.add_argument(
@@ -492,6 +672,34 @@ examples:
         ),
     )
     parser.add_argument(
+        '--test', dest='selected_tests', action='append', default=[],
+        metavar='NAME',
+        help=(
+            'with --update, replace only this test case. Can be used multiple '
+            'times. If omitted, --update keeps the old behavior and replaces '
+            'all matching tests.'
+        ),
+    )
+    parser.add_argument(
+        '--tests', dest='selected_tests_csv', action='append', default=[],
+        metavar='NAMES',
+        help=(
+            'with --update, comma-separated test names to replace, for example '
+            '--tests "Login succeeds,Checkout". Use --test for names containing commas.'
+        ),
+    )
+    parser.add_argument(
+        '--tests-file', type=Path, default=None, metavar='FILE',
+        help=(
+            'with --update, replace only test cases listed in FILE '
+            '(one test name per line; blank lines and # comments are ignored)'
+        ),
+    )
+    parser.add_argument(
+        '--list-update-candidates', action='store_true',
+        help='list test cases that can be replaced by a later file, then exit',
+    )
+    parser.add_argument(
         '--no-dedup', action='store_true',
         help='disable automatic deduplication of identical files',
     )
@@ -515,6 +723,32 @@ examples:
         print("Error: at least 2 .xml files are required.", file=sys.stderr)
         sys.exit(1)
 
+    selected_update_tests: list[str] | None = None
+    raw_selected_tests = list(args.selected_tests or [])
+    for group in args.selected_tests_csv or []:
+        raw_selected_tests.extend(name.strip() for name in group.split(','))
+    if args.tests_file:
+        if not args.tests_file.exists():
+            print(f"Error: tests file not found: {args.tests_file}", file=sys.stderr)
+            sys.exit(1)
+        for line in args.tests_file.read_text(encoding='utf-8').splitlines():
+            name = line.strip()
+            if name and not name.startswith('#'):
+                raw_selected_tests.append(name)
+
+    if raw_selected_tests:
+        if not args.update:
+            print("Error: --test/--tests-file can only be used with --update.", file=sys.stderr)
+            sys.exit(1)
+        selected_update_tests = list(dict.fromkeys(t.strip() for t in raw_selected_tests if t.strip()))
+        if not selected_update_tests:
+            print("Error: no valid test names were provided.", file=sys.stderr)
+            sys.exit(1)
+
+    if args.list_update_candidates and not args.update:
+        print("Error: --list-update-candidates can only be used with --update.", file=sys.stderr)
+        sys.exit(1)
+
     # --- Deduplicate ---
     if not args.no_dedup:
         unique_paths, skipped = deduplicate_files(args.files)
@@ -532,6 +766,19 @@ examples:
         xml_paths = [str(p) for p in unique_paths]
     else:
         xml_paths = [str(p) for p in args.files]
+
+    if args.list_update_candidates:
+        candidates = list_update_candidates(xml_paths)
+        if not candidates:
+            print("No update candidates found.")
+        else:
+            print(f"Update candidates ({len(candidates)}):")
+            for item in candidates:
+                latest = item['later'][-1] if item['later'] else {}
+                status = f" [{latest.get('status')}]" if latest.get('status') else ''
+                print(f"  {item['name']}{status}")
+                print(f"    latest: {latest.get('file_name', '')}")
+        return
 
     # --- Create output dir ---
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -558,6 +805,10 @@ examples:
     if args.update:
         history_label = 'latest status only' if args.latest_only else 'keep old result history'
         print(f"  Update history: {history_label}")
+        if selected_update_tests is None:
+            print("  Update scope: all matching tests")
+        else:
+            print(f"  Update scope: {len(selected_update_tests)} selected test(s)")
     if args.name:
         print(f"  Output prefix: {args.name}")
     else:
@@ -574,6 +825,7 @@ examples:
             args.update,
             resolved_suite_name,
             not args.latest_only,
+            selected_update_tests,
         )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)

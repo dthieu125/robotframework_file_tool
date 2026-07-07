@@ -536,6 +536,60 @@ body {
   background: rgba(248,81,73,.1);
 }
 
+/* --- Update / Replace test picker ---------------------------------- */
+.update-scope-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: rgba(128,128,128,0.03);
+}
+
+.update-search {
+  max-width: 220px;
+}
+
+.update-candidate-list {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  background: var(--bg-input);
+}
+
+.update-candidate-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  margin: 0;
+}
+
+.update-candidate-row:hover {
+  background: var(--bg-hover);
+}
+
+.update-candidate-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.update-candidate-name {
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.update-candidate-meta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
 /* --- Tables --------------------------------------------------------- */
 .table {
   color: var(--text-primary);

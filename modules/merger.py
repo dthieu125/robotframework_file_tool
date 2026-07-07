@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 import sys
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -145,6 +146,155 @@ def _output_paths(output_dir: Path, output_name: str | None) -> tuple[Path, Path
     )
 
 
+def _child_elements(elem: ET.Element, tag_name: str) -> list[ET.Element]:
+    """Return direct children whose tag matches *tag_name* without namespaces."""
+    return [child for child in list(elem) if child.tag.rsplit('}', 1)[-1] == tag_name]
+
+
+def _find_status(test: ET.Element) -> ET.Element | None:
+    for child in list(test):
+        if child.tag.rsplit('}', 1)[-1] == 'status':
+            return child
+    return None
+
+
+def _iter_suite_tests(suite: ET.Element, suite_path: tuple[str, ...] = ()):
+    suite_name = suite.get('name', '')
+    current_path = (*suite_path, suite_name) if suite_name else suite_path
+
+    for test in _child_elements(suite, 'test'):
+        status = _find_status(test)
+        yield {
+            'name': test.get('name', ''),
+            'suite': ' / '.join(current_path),
+            'status': status.get('status', '') if status is not None else '',
+            'message': (status.text or '').strip()[:300] if status is not None else '',
+        }
+
+    for sub_suite in _child_elements(suite, 'suite'):
+        yield from _iter_suite_tests(sub_suite, current_path)
+
+
+def _root_suite(root: ET.Element) -> ET.Element | None:
+    if root.tag.rsplit('}', 1)[-1] == 'suite':
+        return root
+    for child in list(root):
+        if child.tag.rsplit('}', 1)[-1] == 'suite':
+            return child
+    return None
+
+
+def _read_test_occurrences(xml_path: str, file_index: int, file_name: str) -> list[dict]:
+    tree = ET.parse(xml_path)
+    suite = _root_suite(tree.getroot())
+    if suite is None:
+        return []
+
+    occurrences = []
+    for item in _iter_suite_tests(suite):
+        if not item['name']:
+            continue
+        occurrences.append({
+            **item,
+            'file_index': file_index,
+            'file_name': file_name,
+        })
+    return occurrences
+
+
+def list_update_candidates(xml_paths: list[str], file_names: list[str] | None = None) -> list[dict]:
+    """List test names that can be replaced by a later file in update mode."""
+    if file_names is None:
+        file_names = [Path(p).name for p in xml_paths]
+
+    seen_by_name: dict[str, list[dict]] = {}
+    candidates: dict[str, dict] = {}
+
+    for idx, xml_path in enumerate(xml_paths):
+        file_name = file_names[idx] if idx < len(file_names) else Path(xml_path).name
+        for occ in _read_test_occurrences(xml_path, idx, file_name):
+            name = occ['name']
+            previous = seen_by_name.get(name, [])
+            if previous:
+                candidate = candidates.setdefault(name, {
+                    'name': name,
+                    'earlier': [],
+                    'later': [],
+                })
+                for prev in previous:
+                    if not any(
+                        p['file_index'] == prev['file_index'] and p['suite'] == prev['suite']
+                        for p in candidate['earlier']
+                    ):
+                        candidate['earlier'].append(prev)
+                candidate['later'].append(occ)
+            seen_by_name.setdefault(name, []).append(occ)
+
+    return sorted(candidates.values(), key=lambda item: item['name'].lower())
+
+
+def _suite_has_tests(suite: ET.Element) -> bool:
+    if _child_elements(suite, 'test'):
+        return True
+    return any(_suite_has_tests(sub) for sub in _child_elements(suite, 'suite'))
+
+
+def _filter_suite_for_selected_tests(suite: ET.Element, selected_names: set[str], eligible_names: set[str]) -> int:
+    kept = 0
+
+    for child in list(suite):
+        tag = child.tag.rsplit('}', 1)[-1]
+        if tag == 'test':
+            name = child.get('name', '')
+            if name in selected_names and name in eligible_names:
+                kept += 1
+            else:
+                suite.remove(child)
+        elif tag == 'suite':
+            kept += _filter_suite_for_selected_tests(child, selected_names, eligible_names)
+            if not _suite_has_tests(child):
+                suite.remove(child)
+
+    return kept
+
+
+def _prepare_selective_update_paths(
+    xml_paths: list[str],
+    selected_names: set[str],
+    temp_dir: Path,
+) -> tuple[list[str], int]:
+    """Return XML paths for selective update mode.
+
+    The first file is kept intact. Later files are copied to temporary XMLs
+    with only selected tests that have appeared in an earlier file.
+    """
+    prepared = [xml_paths[0]]
+    seen_names: set[str] = set()
+    kept_total = 0
+
+    for idx, xml_path in enumerate(xml_paths):
+        original_occurrences = _read_test_occurrences(xml_path, idx, Path(xml_path).name)
+        current_names = {occ['name'] for occ in original_occurrences}
+
+        if idx == 0:
+            seen_names.update(current_names)
+            continue
+
+        tree = ET.parse(xml_path)
+        suite = _root_suite(tree.getroot())
+        if suite is not None:
+            kept = _filter_suite_for_selected_tests(suite, selected_names, seen_names)
+            if kept:
+                filtered_path = temp_dir / f'selected_update_{idx}.xml'
+                tree.write(str(filtered_path), encoding='UTF-8', xml_declaration=True)
+                prepared.append(str(filtered_path))
+                kept_total += kept
+
+        seen_names.update(current_names)
+
+    return prepared, kept_total
+
+
 def merge_xml_reports(
     xml_paths: list[str],
     output_dir: Path,
@@ -153,6 +303,7 @@ def merge_xml_reports(
     update_mode: bool = False,
     suite_name: str | None = None,
     keep_update_history: bool = True,
+    selected_update_tests: list[str] | None = None,
 ) -> dict:
     """
     Merge Robot Framework output XML files.
@@ -193,6 +344,24 @@ def merge_xml_reports(
         # repaired XML to regenerate log.html and report.html.                #
         # ------------------------------------------------------------------ #
         effective_name = suite_name or output_name
+        selective_count = 0
+        temp_ctx = None
+        merge_paths = xml_paths
+
+        if selected_update_tests is not None:
+            selected_names = {name for name in selected_update_tests if name}
+            if not selected_names:
+                raise RuntimeError('No test cases were selected for selective update.')
+            temp_ctx = tempfile.TemporaryDirectory(prefix='rf_selective_update_')
+            merge_paths, selective_count = _prepare_selective_update_paths(
+                xml_paths,
+                selected_names,
+                Path(temp_ctx.name),
+            )
+            if len(merge_paths) < 2 or selective_count == 0:
+                temp_ctx.cleanup()
+                raise RuntimeError('None of the selected test cases can replace an earlier result.')
+
         rebot_cmd = [
             sys.executable, '-m', 'robot.rebot',
             '--merge',
@@ -200,12 +369,16 @@ def merge_xml_reports(
             '--output', output_xml.name,
             '--log', 'NONE',
             '--report', 'NONE',
-            *xml_paths,
+            *merge_paths,
         ]
         if effective_name:
             rebot_cmd[6:6] = ['--name', effective_name]
 
-        proc = subprocess.run(rebot_cmd, **run_kwargs)
+        try:
+            proc = subprocess.run(rebot_cmd, **run_kwargs)
+        finally:
+            if temp_ctx is not None:
+                temp_ctx.cleanup()
 
         if proc.returncode >= 250:
             detail = (proc.stderr or '').strip() or (proc.stdout or '').strip()
@@ -263,7 +436,11 @@ def merge_xml_reports(
         created = [str(p) for p in [output_xml, output_log, output_report] if p.exists()]
         if not created:
             raise RuntimeError('rebot --merge produced no files. Check the input XML format.')
-        return {'files': created, 'stripped_history_count': stripped_history_count}
+        return {
+            'files': created,
+            'stripped_history_count': stripped_history_count,
+            'selective_update_count': selective_count,
+        }
 
     # ---------------------------------------------------------------------- #
     # Combine mode (default)                                                  #

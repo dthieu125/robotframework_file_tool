@@ -201,6 +201,22 @@ def merge_reports():
         flatten = request.form.get('flatten', 'false').lower() == 'true'
         update_mode = request.form.get('update_mode', 'false').lower() == 'true'
         keep_update_history = request.form.get('keep_update_history', 'true').lower() == 'true'
+        update_scope = request.form.get('update_scope', 'all')
+        selected_update_tests = None
+        if update_mode and update_scope == 'selected':
+            try:
+                selected_update_tests = json.loads(request.form.get('selected_update_tests', '[]'))
+            except json.JSONDecodeError:
+                selected_update_tests = []
+            if not isinstance(selected_update_tests, list):
+                selected_update_tests = []
+            selected_update_tests = [
+                str(name).strip()
+                for name in selected_update_tests
+                if str(name).strip()
+            ]
+            if not selected_update_tests:
+                return jsonify({'error': 'Please select at least one test case to update'}), 400
         raw_output_name = request.form.get('output_name', '').strip()
         output_name = secure_filename(raw_output_name) if raw_output_name else None
         suite_name = request.form.get('suite_name', '').strip() or None
@@ -282,6 +298,7 @@ def merge_reports():
             update_mode,
             suite_name,
             keep_update_history,
+            selected_update_tests,
         )
 
         zip_path = RESULTS_DIR / f'{run_id}.zip'
@@ -296,6 +313,8 @@ def merge_reports():
             'report_url': f'/api/merge/{run_id}/report',
             'log_url': f'/api/merge/{run_id}/log',
             'update_mode': update_mode,
+            'update_scope': update_scope if update_mode else 'all',
+            'selective_update_count': result.get('selective_update_count', 0),
             'keep_update_history': keep_update_history,
             'stripped_history_count': result.get('stripped_history_count', 0),
         }
@@ -303,6 +322,53 @@ def merge_reports():
             resp['skipped_duplicates'] = skipped_duplicates
             resp['unique_file_count'] = len(unique_entries)
         return jsonify(resp)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/merge/update-candidates', methods=['POST'])
+def merge_update_candidates():
+    from modules.merger import list_update_candidates
+    try:
+        files = request.files.getlist('files')
+        if len(files) < 2:
+            return jsonify({'error': 'At least 2 output.xml files are required'}), 400
+
+        with tempfile.TemporaryDirectory(prefix='rf_update_candidates_') as tmp:
+            tmp_dir = Path(tmp)
+            xml_paths = []
+            file_names = []
+            name_counter: dict[str, int] = {}
+
+            for f in files:
+                if not f.filename:
+                    continue
+                base_name = secure_filename(f.filename) or 'output.xml'
+                stem = Path(base_name).stem
+                ext = Path(base_name).suffix or '.xml'
+                if base_name in name_counter:
+                    idx = name_counter[base_name]
+                    name_counter[base_name] = idx + 1
+                    safe_name = f'{stem}_{idx}{ext}'
+                else:
+                    name_counter[base_name] = 2
+                    safe_name = base_name
+
+                path = tmp_dir / safe_name
+                path.write_bytes(f.read())
+                xml_paths.append(str(path))
+                file_names.append(f.filename)
+
+            if len(xml_paths) < 2:
+                return jsonify({'error': 'At least 2 valid files are required'}), 400
+
+            candidates = list_update_candidates(xml_paths, file_names)
+
+        return jsonify({
+            'success': True,
+            'candidates': candidates,
+            'count': len(candidates),
+        })
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 

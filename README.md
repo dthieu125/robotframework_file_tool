@@ -65,6 +65,7 @@ The web Report Merger supports two merge modes:
 
 - Combine: include tests from all input files.
 - Update / Replace: later files replace same-named tests from earlier files, using Robot Framework `rebot --merge`.
+  By default all matching tests are replaced; the web UI can also list matching test cases so you can choose only the tests whose result/log should be overwritten.
 
 Report Merger settings include:
 
@@ -96,6 +97,10 @@ python rf_merge.py --flatten *.xml
 python rf_merge.py --xml-only *.xml
 python rf_merge.py --update old_results.xml new_rerun.xml
 python rf_merge.py --update --latest-only old_results.xml new_rerun.xml
+python rf_merge.py --update --test "Login succeeds" --test "Checkout" old_results.xml new_rerun.xml
+python rf_merge.py --update --tests "Login succeeds,Checkout" old_results.xml new_rerun.xml
+python rf_merge.py --update --tests-file selected_tests.txt old_results.xml new_rerun.xml
+python rf_merge.py --update --list-update-candidates old_results.xml new_rerun.xml
 ```
 
 Useful flags:
@@ -107,6 +112,10 @@ Useful flags:
 - `--xml-only`: only create merged XML and skip HTML generation.
 - `--update`: replace same-named tests from earlier files with later files.
 - `--latest-only`: with `--update`, remove Robot Framework old-result history and keep only the latest status.
+- `--test NAME`: with `--update`, replace only this test case. Repeat it for multiple tests. If omitted, `--update` keeps the old behavior and replaces all matching tests.
+- `--tests NAMES`: with `--update`, replace comma-separated test names, for example `--tests "Login succeeds,Checkout"`.
+- `--tests-file FILE`: with `--update`, replace only test cases listed in a text file, one test name per line.
+- `--list-update-candidates`: with `--update`, print test cases that can be replaced by later files, then exit.
 - `--no-dedup`: disable deduplication of byte-identical files.
 
 ## API Entry Points

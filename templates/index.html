@@ -142,6 +142,39 @@
                 <strong>Tip:</strong> Upload the <em>old</em> result first, then the <em>new re-run</em> result.
                 Tests that exist in the new file will replace their counterparts in the old file.
               </div>
+              <div id="merger-update-scope" class="update-scope-panel mt-3" style="display:none">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="merger-update-scope" id="merger-update-scope-all" value="all" checked />
+                  <label class="form-check-label" for="merger-update-scope-all">
+                    Overwrite all matching test cases
+                    <span class="text-muted small"> &mdash; default behavior</span>
+                  </label>
+                </div>
+                <div class="form-check mt-1">
+                  <input class="form-check-input" type="radio" name="merger-update-scope" id="merger-update-scope-selected" value="selected" />
+                  <label class="form-check-label" for="merger-update-scope-selected">
+                    Choose test cases to overwrite
+                  </label>
+                </div>
+                <div id="merger-update-picker" class="update-picker mt-2" style="display:none">
+                  <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
+                    <button class="btn btn-sm btn-outline-secondary" id="merger-load-candidates-btn">
+                      <i class="fa-solid fa-list-check me-1"></i>Load Test Cases
+                    </button>
+                    <input type="text" class="form-control form-control-sm update-search" id="merger-update-search" placeholder="Search test case..." />
+                    <button class="btn btn-sm btn-outline-secondary" id="merger-select-all-candidates" style="display:none">
+                      <i class="fa-solid fa-check-double me-1"></i>Select All
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="merger-clear-candidates" style="display:none">
+                      <i class="fa-solid fa-eraser me-1"></i>Clear
+                    </button>
+                    <span class="text-muted small ms-auto" id="merger-selected-count">0 selected</span>
+                  </div>
+                  <div id="merger-update-candidate-list" class="update-candidate-list">
+                    <div class="text-muted small">Load the list after selecting at least two output.xml files.</div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="mb-4">
