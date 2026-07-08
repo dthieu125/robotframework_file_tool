@@ -952,6 +952,269 @@ body {
   }
 }
 
+/* --- Web pet -------------------------------------------------------- */
+#rf-web-pet {
+  --pet-scale: 0.82;
+  --pet-frame: 0;
+  --pet-speed: 0;
+  position: fixed;
+  left: -70px;
+  top: -72px;
+  width: 140px;
+  height: 120px;
+  z-index: 70;
+  transform-origin: 50% 86%;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  filter: drop-shadow(0 8px 14px rgba(0,0,0,.22));
+  will-change: transform;
+  contain: layout style paint;
+}
+
+#rf-web-pet .rf-pet-stage {
+  position: absolute;
+  inset: 0;
+  transform: scale(var(--pet-scale)) scaleY(calc(1 + var(--pet-growth, 0) * .035));
+  transform-origin: 50% 88%;
+  transition: transform .65s cubic-bezier(.2,.8,.2,1), filter .3s ease;
+  animation: petBreath 2.8s ease-in-out infinite;
+}
+
+#rf-web-pet svg {
+  overflow: visible;
+}
+
+#rf-web-pet .rf-pet-shadow {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 12px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.18);
+  transform: scaleX(calc(.82 + var(--pet-speed) * .45));
+  opacity: .7;
+  transition: transform .15s linear;
+}
+
+#rf-web-pet .rf-pet-speech {
+  position: absolute;
+  left: 34px;
+  bottom: 104px;
+  max-width: 128px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 11px;
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#rf-web-pet .rf-pet-speech.visible {
+  opacity: .96;
+  transform: translateY(0);
+}
+
+#rf-web-pet[data-moving="true"] .pet-leg-front {
+  transform: rotate(calc(var(--pet-frame) * 19deg)) translateY(calc(var(--pet-speed) * 2px));
+  transform-origin: 68px 72px;
+  animation: petFrontLeg .36s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-moving="true"] .pet-leg-back {
+  transform: rotate(calc(var(--pet-frame) * -17deg)) translateY(calc(var(--pet-speed) * -1px));
+  transform-origin: 50px 72px;
+  animation: petBackLeg .36s ease-in-out infinite alternate;
+}
+
+#rf-web-pet .pet-tail {
+  transform-origin: 36px 64px;
+  animation: petTailIdle 1.8s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-moving="true"] .pet-tail,
+#rf-web-pet[data-mood="excited"] .pet-tail {
+  animation: petTailWag .34s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-moving="true"] .pet-wing-front {
+  transform: rotate(calc(var(--pet-frame) * 16deg));
+  transform-origin: 78px 58px;
+  animation: petWingFront .32s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-moving="true"] .pet-wing-back {
+  transform: rotate(calc(var(--pet-frame) * -12deg));
+  transform-origin: 48px 58px;
+  animation: petWingBack .34s ease-in-out infinite alternate;
+}
+
+#rf-web-pet .pet-head {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: petHeadIdle 2.6s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-moving="true"] .pet-head {
+  animation: petHeadWalk .46s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-mode="curious"] .pet-ear,
+#rf-web-pet[data-mode="flee"] .pet-ear,
+#rf-web-pet[data-mode="greet"] .pet-ear {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: petEarTwitch .65s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-mode="greet"] .rf-pet-stage {
+  animation: petGreet .42s ease-in-out infinite alternate;
+}
+
+#rf-web-pet[data-mode="flee"] .rf-pet-stage {
+  filter: brightness(1.05) saturate(1.08);
+}
+
+#rf-web-pet[data-growth="adult"] .rf-pet-stage {
+  filter: saturate(1.08) contrast(1.03);
+}
+
+#rf-web-pet[data-growth="hatchling"] .rf-pet-stage {
+  filter: saturate(1.08) brightness(1.03);
+}
+
+#rf-web-pet .pet-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: petBlink 5.8s ease-in-out infinite;
+}
+
+#rf-web-pet .pet-eye-sleepy,
+#rf-web-pet .pet-eye-sad,
+#rf-web-pet .pet-mouth,
+#rf-web-pet .pet-mouth-sleepy {
+  display: none;
+}
+
+#rf-web-pet[data-mood="happy"] .pet-mouth-happy,
+#rf-web-pet[data-mood="excited"] .pet-mouth-excited,
+#rf-web-pet[data-mood="sad"] .pet-mouth-sad,
+#rf-web-pet[data-mood="sleepy"] .pet-mouth-sleepy {
+  display: inline;
+}
+
+#rf-web-pet[data-mood="sleepy"] .pet-eye,
+#rf-web-pet[data-mood="sad"] .pet-eye-spark {
+  display: none;
+}
+
+#rf-web-pet[data-mood="sleepy"] .pet-eye-sleepy,
+#rf-web-pet[data-mood="sad"] .pet-eye-sad {
+  display: inline;
+}
+
+#rf-web-pet[data-mood="excited"] .pet-eye {
+  animation: petExcitedEyes .65s ease-in-out infinite alternate;
+}
+
+.pet-snake-body,
+.pet-snake-belly {
+  stroke-dasharray: 130 16;
+}
+
+#rf-web-pet[data-moving="true"] .pet-snake-body,
+#rf-web-pet[data-moving="true"] .pet-snake-belly {
+  animation: snakeSlither .72s linear infinite;
+}
+
+@keyframes petEarTwitch {
+  from { rotate: -3deg; }
+  to { rotate: 5deg; }
+}
+
+@keyframes petBreath {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -1.2px; }
+}
+
+@keyframes petHeadIdle {
+  from { rotate: -1.8deg; translate: 0 0; }
+  to { rotate: 2deg; translate: 0 -1px; }
+}
+
+@keyframes petHeadWalk {
+  from { rotate: -4deg; translate: 0 1px; }
+  to { rotate: 4deg; translate: 0 -2px; }
+}
+
+@keyframes petFrontLeg {
+  from { rotate: -15deg; translate: 0 1px; }
+  to { rotate: 18deg; translate: 0 -2px; }
+}
+
+@keyframes petBackLeg {
+  from { rotate: 17deg; translate: 0 -1px; }
+  to { rotate: -15deg; translate: 0 2px; }
+}
+
+@keyframes petTailIdle {
+  from { rotate: -3deg; }
+  to { rotate: 5deg; }
+}
+
+@keyframes petTailWag {
+  from { rotate: -13deg; }
+  to { rotate: 16deg; }
+}
+
+@keyframes petWingFront {
+  from { rotate: -16deg; translate: 0 1px; }
+  to { rotate: 18deg; translate: 0 -3px; }
+}
+
+@keyframes petWingBack {
+  from { rotate: 12deg; translate: 0 1px; }
+  to { rotate: -14deg; translate: 0 -2px; }
+}
+
+@keyframes petBlink {
+  0%, 92%, 100% { scale: 1 1; }
+  95% { scale: 1 .08; }
+}
+
+@keyframes petExcitedEyes {
+  from { scale: 1 1; }
+  to { scale: 1.18 1.18; }
+}
+
+@keyframes petGreet {
+  from { transform: scale(var(--pet-scale)) translateY(0); }
+  to { transform: scale(var(--pet-scale)) translateY(-5px); }
+}
+
+@keyframes snakeSlither {
+  to { stroke-dashoffset: -28; }
+}
+
+@media (max-width: 700px) {
+  #rf-web-pet {
+    z-index: 60;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #rf-web-pet {
+    display: none;
+  }
+}
+
 /* --- Rule groups (formatter) --------------------------------------- */
 .rule-group {
   background: rgba(128,128,128,0.03);

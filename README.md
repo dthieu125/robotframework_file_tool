@@ -76,6 +76,11 @@ Upload limit is 200 MB. Runtime files are stored in `uploads/` and `results/`; b
 | File Statistics | Analyze Robot files and list test cases, keywords, settings, variables, line numbers, and source content. |
 | Test Runner | Upload and run a `.robot` file, stream console output in real time, and download generated results. |
 | Name Formatter | Preview and apply bulk test case rename rules such as regex replacement, prefix/suffix, templates, and numbering. |
+| Web Pet | A lightweight animated pet mascot that wanders around the app, grows over time, and reacts to the mouse cursor. |
+
+The Web Pet is inspired by open-source web mascot and virtual pet projects,
+including Tamaweb, but uses local SVG drawings and app-specific behavior rather
+than vendoring Tamaweb's CC BY-NC-SA assets.
 
 ## Versioning
 
