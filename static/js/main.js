@@ -135,6 +135,100 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 });
 
 /* ===================================================================
+   APP VERSION WATCHER
+=================================================================== */
+
+(function () {
+  const initialToken = document.body.dataset.appVersionToken || '';
+  let currentToken = initialToken;
+  let reloading = false;
+
+  async function checkAppVersion() {
+    if (reloading) return;
+    try {
+      const res = await fetch('/api/app-version', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.token || data.token === currentToken) return;
+
+      currentToken = data.token;
+      reloading = true;
+      const label = document.getElementById('app-version-label');
+      if (label) label.textContent = `${data.display} — EN + Dark/Light mode`;
+      showToast(`App has been updated to ${data.display}. Reloading...`, 'info');
+      setTimeout(() => window.location.reload(), 1600);
+    } catch {
+      // The development server may be restarting. The next poll will catch up.
+    }
+  }
+
+  if (initialToken) {
+    setInterval(checkAppVersion, 5000);
+  }
+})();
+
+/* ===================================================================
+   USAGE HEARTBEAT
+=================================================================== */
+
+(function () {
+  const CLIENT_ID_KEY = 'rf-client-id';
+  let clientId = localStorage.getItem(CLIENT_ID_KEY);
+  if (!clientId) {
+    clientId = window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(CLIENT_ID_KEY, clientId);
+  }
+
+  function renderUsage(data) {
+    const activeEl = document.getElementById('admin-active-clients');
+    const jobsEl = document.getElementById('admin-running-jobs');
+    const noteEl = document.getElementById('admin-usage-note');
+    if (activeEl) activeEl.textContent = data.active_clients ?? 0;
+    if (jobsEl) jobsEl.textContent = data.running_jobs ?? 0;
+    if (noteEl) {
+      noteEl.textContent = `Clients are counted from browser heartbeats within ${data.ttl_seconds || 45}s.`;
+    }
+  }
+
+  async function sendHeartbeat() {
+    try {
+      const res = await fetch('/api/client/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: clientId,
+          page: location.pathname + location.hash,
+          version: document.body.dataset.appVersionToken || '',
+        }),
+      });
+      if (res.ok) renderUsage(await res.json());
+    } catch {
+      // The app may be restarting because source files changed.
+    }
+  }
+
+  async function refreshUsage() {
+    try {
+      const res = await fetch('/api/admin/usage', { cache: 'no-store' });
+      if (res.ok) renderUsage(await res.json());
+    } catch {
+      // Usage is best-effort admin telemetry.
+    }
+  }
+
+  sendHeartbeat();
+  setInterval(sendHeartbeat, 15000);
+  setInterval(refreshUsage, 30000);
+
+  const settingsModal = document.getElementById('merger-settings-modal');
+  if (settingsModal) {
+    settingsModal.addEventListener('show.bs.modal', refreshUsage);
+  }
+})();
+
+/* ===================================================================
    1. REPORT MERGER
 =================================================================== */
 
@@ -145,8 +239,10 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 
   let mergerFiles = [];
   const MERGER_SETTINGS_KEY = 'rf-merger-settings';
+  const MERGER_SETTINGS_VERSION = 2;
   const mergerSettings = {
-    updateHistory: 'keep',
+    version: MERGER_SETTINGS_VERSION,
+    updateHistory: 'latest',
     clearInputsAfterMerge: false,
     cleanupAgeHours: 24,
   };
@@ -164,7 +260,10 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   function readMergerSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(MERGER_SETTINGS_KEY) || '{}');
-      Object.assign(mergerSettings, saved);
+      if (saved.version !== MERGER_SETTINGS_VERSION) {
+        delete saved.updateHistory;
+      }
+      Object.assign(mergerSettings, saved, { version: MERGER_SETTINGS_VERSION });
     } catch { /* keep defaults */ }
   }
 
@@ -182,6 +281,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       document.getElementById('merger-clear-inputs-after-merge').checked;
     mergerSettings.cleanupAgeHours =
       Math.max(1, parseInt(document.getElementById('cleanup-age-hours').value, 10) || 24);
+    mergerSettings.version = MERGER_SETTINGS_VERSION;
     localStorage.setItem(MERGER_SETTINGS_KEY, JSON.stringify(mergerSettings));
   }
 

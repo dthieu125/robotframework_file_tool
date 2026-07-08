@@ -48,6 +48,24 @@ set PORT=8080
 python app.py
 ```
 
+`start.bat` and `start.sh` enable `RF_AUTO_RELOAD=1` by default. When source files
+under `app.py`, `modules/`, `templates/`, `static/`, `rf_merge.py`, or
+`version.json` change, Flask restarts the app and the browser shows an update
+notification before reloading the page.
+
+To enable the same behavior when running manually:
+
+```bash
+set RF_AUTO_RELOAD=1
+python app.py
+```
+
+On Linux/macOS:
+
+```bash
+RF_AUTO_RELOAD=1 python app.py
+```
+
 Upload limit is 200 MB. Runtime files are stored in `uploads/` and `results/`; both are ignored by git.
 
 ## Web Features
@@ -58,6 +76,15 @@ Upload limit is 200 MB. Runtime files are stored in `uploads/` and `results/`; b
 | File Statistics | Analyze Robot files and list test cases, keywords, settings, variables, line numbers, and source content. |
 | Test Runner | Upload and run a `.robot` file, stream console output in real time, and download generated results. |
 | Name Formatter | Preview and apply bulk test case rename rules such as regex replacement, prefix/suffix, templates, and numbering. |
+
+## Versioning
+
+The app version is managed in [`version.json`](version.json), not hard-coded in
+HTML. The UI displays the semantic version plus a short source fingerprint, for
+example `v1.3.0+abc1234`. If watched source files change, the fingerprint changes
+and open browser tabs automatically reload after showing an update notification.
+The same file also stores release notes, quick app guidance, and CLI examples
+shown in the About dialog.
 
 ## Report Merger Notes
 
@@ -101,6 +128,7 @@ python rf_merge.py --update --test "Login succeeds" --test "Checkout" old_result
 python rf_merge.py --update --tests "Login succeeds,Checkout" old_results.xml new_rerun.xml
 python rf_merge.py --update --tests-file selected_tests.txt old_results.xml new_rerun.xml
 python rf_merge.py --update --list-update-candidates old_results.xml new_rerun.xml
+python rf_merge.py --version
 ```
 
 Useful flags:
@@ -116,6 +144,7 @@ Useful flags:
 - `--tests NAMES`: with `--update`, replace comma-separated test names, for example `--tests "Login succeeds,Checkout"`.
 - `--tests-file FILE`: with `--update`, replace only test cases listed in a text file, one test name per line.
 - `--list-update-candidates`: with `--update`, print test cases that can be replaced by later files, then exit.
+- `--version`: print the CLI version. Inside the repo it reads `version.json`; downloaded standalone copies use the embedded fallback version.
 - `--no-dedup`: disable deduplication of byte-identical files.
 
 ## API Entry Points

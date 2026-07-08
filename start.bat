@@ -58,10 +58,14 @@ set LOCAL_IP=%LOCAL_IP: =%
 echo ================================================
 echo   Access tool at:
 echo     Local  : http://localhost:5000
-echo     Mang   : http://%LOCAL_IP%:5000
+echo     Network: http://%LOCAL_IP%:5000
 echo ================================================
 echo.
 echo Press Ctrl+C to stop server
+echo.
+
+set RF_AUTO_RELOAD=1
+echo [INFO] Auto reload is enabled. Source changes will restart the app.
 echo.
 
 :: Open browser after 2 seconds

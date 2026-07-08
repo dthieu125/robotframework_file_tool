@@ -62,16 +62,35 @@ BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
 RESULTS_DIR = BASE_DIR / 'results'
 SETTINGS_FILE = BASE_DIR / 'settings.json'
+VERSION_FILE = BASE_DIR / 'version.json'
 UPLOAD_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
 
 # In-memory store for ongoing runs
 run_store: dict = {}
+active_clients: dict = {}
+active_clients_lock = threading.Lock()
 cleanup_started = False
+last_logged_active_clients = -1
 
 DEFAULT_SETTINGS = {
     'cleanup_age_hours': 24,
 }
+
+DEFAULT_APP_VERSION = {
+    'name': 'Robot Framework Web Tool',
+    'version': '0.0.0',
+    'summary': '',
+    'changelog': [],
+    'app_guide': [],
+    'cli': {},
+}
+
+ACTIVE_CLIENT_TTL_SECONDS = 45
+
+WATCHED_SOURCE_DIRS = ['modules', 'static', 'templates']
+WATCHED_SOURCE_FILES = ['app.py', 'rf_merge.py', 'README.md', 'requirements.txt', 'version.json']
+WATCHED_SOURCE_EXTS = {'.py', '.html', '.css', '.js', '.json', '.md', '.txt'}
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +176,117 @@ def _zip_dir(src: Path, dest: Path):
                 zf.write(str(f), str(f.relative_to(src)))
 
 
+def _load_app_version_base() -> dict:
+    version_info = DEFAULT_APP_VERSION.copy()
+    if VERSION_FILE.exists():
+        try:
+            saved = json.loads(VERSION_FILE.read_text(encoding='utf-8'))
+            if isinstance(saved, dict):
+                for key in version_info:
+                    if key in saved and saved[key]:
+                        version_info[key] = saved[key]
+        except Exception:
+            pass
+    return version_info
+
+
+def _iter_watched_source_files():
+    for relative in WATCHED_SOURCE_FILES:
+        path = BASE_DIR / relative
+        if path.exists() and path.is_file():
+            yield path
+
+    for dirname in WATCHED_SOURCE_DIRS:
+        root = BASE_DIR / dirname
+        if not root.exists():
+            continue
+        for path in root.rglob('*'):
+            if path.is_file() and path.suffix.lower() in WATCHED_SOURCE_EXTS:
+                yield path
+
+
+def _source_fingerprint() -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    for path in sorted(set(_iter_watched_source_files())):
+        try:
+            stat = path.stat()
+            rel = path.relative_to(BASE_DIR).as_posix()
+            digest.update(rel.encode('utf-8', errors='replace'))
+            digest.update(str(stat.st_mtime_ns).encode('ascii'))
+            digest.update(str(stat.st_size).encode('ascii'))
+        except Exception:
+            continue
+    return digest.hexdigest()[:12]
+
+
+def _get_app_version() -> dict:
+    base = _load_app_version_base()
+    fingerprint = _source_fingerprint()
+    version = base.get('version', DEFAULT_APP_VERSION['version'])
+    return {
+        'name': base.get('name', DEFAULT_APP_VERSION['name']),
+        'version': version,
+        'summary': base.get('summary', ''),
+        'changelog': base.get('changelog', []),
+        'app_guide': base.get('app_guide', []),
+        'cli': base.get('cli', {}),
+        'build': fingerprint,
+        'display': f'v{version}+{fingerprint[:7]}',
+        'token': f'{version}:{fingerprint}',
+    }
+
+
+def _reload_extra_files() -> list[str]:
+    return [str(path) for path in sorted(set(_iter_watched_source_files()))]
+
+
+def _prune_active_clients(now: float | None = None) -> None:
+    if now is None:
+        now = time.time()
+    stale_ids = [
+        client_id
+        for client_id, info in active_clients.items()
+        if now - float(info.get('last_seen', 0)) > ACTIVE_CLIENT_TTL_SECONDS
+    ]
+    for client_id in stale_ids:
+        active_clients.pop(client_id, None)
+
+
+def _active_usage_snapshot() -> dict:
+    now = time.time()
+    with active_clients_lock:
+        _prune_active_clients(now)
+        clients = [
+            {
+                'client_id': client_id,
+                'ip': info.get('ip', ''),
+                'user_agent': info.get('user_agent', ''),
+                'page': info.get('page', ''),
+                'version': info.get('version', ''),
+                'last_seen_seconds_ago': max(0, int(now - float(info.get('last_seen', now)))),
+            }
+            for client_id, info in active_clients.items()
+        ]
+
+    running_jobs = sum(1 for run in run_store.values() if run.get('status') == 'running')
+    return {
+        'active_clients': len(clients),
+        'running_jobs': running_jobs,
+        'ttl_seconds': ACTIVE_CLIENT_TTL_SECONDS,
+        'clients': sorted(clients, key=lambda item: item['last_seen_seconds_ago']),
+    }
+
+
+def _log_active_client_count(count: int) -> None:
+    global last_logged_active_clients
+    if count == last_logged_active_clients:
+        return
+    last_logged_active_clients = count
+    print(f'[usage] active clients: {count}', flush=True)
+
+
 # ---------------------------------------------------------------------------
 # Routes – pages
 # ---------------------------------------------------------------------------
@@ -164,6 +294,50 @@ def _zip_dir(src: Path, dest: Path):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.context_processor
+def inject_app_version():
+    return {'app_version': _get_app_version()}
+
+
+@app.route('/api/app-version')
+def app_version():
+    return jsonify(_get_app_version())
+
+
+@app.route('/api/client/heartbeat', methods=['POST'])
+def client_heartbeat():
+    try:
+        data = request.get_json(silent=True) or {}
+        client_id = str(data.get('client_id', '')).strip()
+        if not client_id:
+            return jsonify({'error': 'Missing client_id'}), 400
+
+        now = time.time()
+        with active_clients_lock:
+            active_clients[client_id] = {
+                'ip': request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip(),
+                'user_agent': request.headers.get('User-Agent', ''),
+                'page': str(data.get('page', '')),
+                'version': str(data.get('version', '')),
+                'last_seen': now,
+            }
+            _prune_active_clients(now)
+            count = len(active_clients)
+
+        _log_active_client_count(count)
+        snapshot = _active_usage_snapshot()
+        return jsonify(snapshot)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
+
+@app.route('/api/admin/usage')
+def admin_usage():
+    snapshot = _active_usage_snapshot()
+    _log_active_client_count(snapshot['active_clients'])
+    return jsonify(snapshot)
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
@@ -591,6 +765,19 @@ def download_results(run_id):
     return jsonify({'error': 'Results not found'}), 404
 
 
+@app.route('/api/download-cli')
+def download_cli():
+    cli_path = BASE_DIR / 'rf_merge.py'
+    if not cli_path.exists():
+        return jsonify({'error': 'CLI file not found'}), 404
+    return send_file(
+        str(cli_path),
+        as_attachment=True,
+        download_name='rf_merge.py',
+        mimetype='text/x-python',
+    )
+
+
 # ---------------------------------------------------------------------------
 # API – Name Formatter
 # ---------------------------------------------------------------------------
@@ -670,14 +857,26 @@ if __name__ == '__main__':
         local_ip = '127.0.0.1'
 
     port = int(os.environ.get('PORT', 5000))
+    auto_reload = os.environ.get('RF_AUTO_RELOAD', '0').lower() in ('1', 'true', 'yes', 'on')
 
     print('\n' + '=' * 55)
     print('  Robot Framework Web Tool')
     print('=' * 55)
     print(f'  Local  : http://localhost:{port}')
     print(f'  Network: http://{local_ip}:{port}')
+    print(f'  Version: {_get_app_version()["display"]}')
+    print(f'  Auto reload: {"on" if auto_reload else "off"}')
     print('=' * 55)
     print('  Press Ctrl+C to stop\n')
 
-    _start_cleanup_worker()
-    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+    if not auto_reload or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        _start_cleanup_worker()
+
+    app.run(
+        host='0.0.0.0',
+        port=port,
+        debug=False,
+        threaded=True,
+        use_reloader=auto_reload,
+        extra_files=_reload_extra_files() if auto_reload else None,
+    )

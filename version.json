@@ -1,0 +1,67 @@
+{
+  "version": "1.4.0",
+  "name": "Robot Framework Web Tool",
+  "summary": "Local web and CLI utilities for Robot Framework output files.",
+  "changelog": [
+    {
+      "version": "1.4.0",
+      "date": "2026-07-08",
+      "changes": [
+        "Added centralized version metadata, changelog, and About dialog.",
+        "Added source auto-reload and browser update notification for local deployments.",
+        "Added active client and running job usage metrics for admins.",
+        "Defaulted report flattening and latest-result update history for new browser settings."
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-07-08",
+      "changes": [
+        "Added selective Update / Replace in the web UI.",
+        "Added CLI options for selected test updates: --test, --tests, and --tests-file.",
+        "Added --list-update-candidates to inspect replaceable test cases before merging."
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-07-07",
+      "changes": [
+        "Added dark and light theme support.",
+        "Improved report merger settings and cleanup controls."
+      ]
+    }
+  ],
+  "app_guide": [
+    {
+      "title": "Report Merger",
+      "description": "Upload two or more Robot Framework output.xml files, choose Combine or Update / Replace, then download the merged output, report, and log."
+    },
+    {
+      "title": "Selective Update",
+      "description": "In Update / Replace mode, keep the default all-test update or load matching test cases and select only the results/logs you want to overwrite."
+    },
+    {
+      "title": "Statistics",
+      "description": "Upload or paste a .robot/.resource file to inspect test cases, keywords, variables, settings, and source lines."
+    },
+    {
+      "title": "Test Runner",
+      "description": "Run a Robot file from the browser, stream console output, then download or view generated results."
+    },
+    {
+      "title": "Name Formatter",
+      "description": "Preview and apply batch test-case renaming rules such as regex replacement, prefix/suffix, templates, and numbering."
+    }
+  ],
+  "cli": {
+    "file": "rf_merge.py",
+    "description": "Standalone CLI report merger for Robot Framework output.xml files.",
+    "commands": [
+      "python rf_merge.py old.xml rerun.xml",
+      "python rf_merge.py --update old.xml rerun.xml",
+      "python rf_merge.py --update --test \"Login succeeds\" old.xml rerun.xml",
+      "python rf_merge.py --update --tests-file selected_tests.txt old.xml rerun.xml",
+      "python rf_merge.py --update --list-update-candidates old.xml rerun.xml"
+    ]
+  }
+}

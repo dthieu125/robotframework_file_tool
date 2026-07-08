@@ -41,6 +41,10 @@ echo "    Network: http://${LOCAL_IP}:5000"
 echo "================================================"
 echo ""
 
+export RF_AUTO_RELOAD=1
+echo "[INFO] Auto reload is enabled. Source changes will restart the app."
+echo ""
+
 # Open browser (macOS / Linux)
 if command -v xdg-open &>/dev/null; then
     (sleep 2 && xdg-open http://localhost:5000) &

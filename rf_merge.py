@@ -68,11 +68,28 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import hashlib
+import json
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as _ET
 from pathlib import Path
+
+
+FALLBACK_CLI_VERSION = '1.4.0'
+
+
+def _cli_version() -> str:
+    version_file = Path(__file__).with_name('version.json')
+    if version_file.exists():
+        try:
+            data = json.loads(version_file.read_text(encoding='utf-8'))
+            version = str(data.get('version', '')).strip()
+            if version:
+                return version
+        except Exception:
+            pass
+    return FALLBACK_CLI_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -611,8 +628,12 @@ def merge_xml_reports(
 
 
 def main():
+    cli_version = _cli_version()
     parser = argparse.ArgumentParser(
-        description='Merge Robot Framework output.xml files into a single report.',
+        description=(
+            f'Robot Framework report merger CLI v{cli_version}. '
+            'Merge output.xml files into a single report.'
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
@@ -624,7 +645,17 @@ examples:
   %(prog)s --update --tests "Login succeeds,Checkout" old.xml rerun.xml
   %(prog)s --update --tests-file selected_tests.txt old.xml rerun.xml
   %(prog)s --update --list-update-candidates old.xml rerun.xml
+
+quick guide:
+  Combine mode keeps test results from all input files.
+  Update mode uses Robot Framework rebot --merge so later files replace
+  same-named tests from earlier files, including result status and logs.
+  Use --test, --tests, or --tests-file to update only selected test cases.
         """,
+    )
+    parser.add_argument(
+        '--version', action='version',
+        version=f'%(prog)s {cli_version}',
     )
     parser.add_argument(
         'files', nargs='+', type=Path,

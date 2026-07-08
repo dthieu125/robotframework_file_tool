@@ -847,6 +847,111 @@ body {
 .settings-item-name { font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); }
 .settings-item-meta { color: var(--text-muted); font-size: 12px; margin-top: 1px; }
 
+.admin-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-usage-metric {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  padding: 10px 12px;
+}
+
+.admin-usage-value {
+  display: block;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.admin-usage-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.about-section {
+  margin-bottom: 22px;
+}
+
+.about-section-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+
+.about-release {
+  margin-bottom: 14px;
+}
+
+.about-release-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.about-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.about-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.about-guide-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(128,128,128,0.03);
+  padding: 10px 12px;
+}
+
+.about-guide-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.about-guide-text {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.about-cli-box {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-code);
+  padding: 10px;
+  overflow-x: auto;
+}
+
+.about-cli-box code {
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .about-guide-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* --- Rule groups (formatter) --------------------------------------- */
 .rule-group {
   background: rgba(128,128,128,0.03);
