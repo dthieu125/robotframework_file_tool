@@ -76,7 +76,7 @@ import xml.etree.ElementTree as _ET
 from pathlib import Path
 
 
-FALLBACK_CLI_VERSION = '1.5.2'
+FALLBACK_CLI_VERSION = '1.5.4'
 
 
 def _cli_version() -> str:

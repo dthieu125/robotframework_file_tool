@@ -1,8 +1,27 @@
 {
-  "version": "1.5.2",
+  "version": "1.5.4",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.5.4",
+      "date": "2026-07-13",
+      "changes": [
+        "Added Web Pet settings to turn the mascot on or off and choose a specific pet type, with random remaining the default.",
+        "Added flying pets: dragon, fly, mosquito, and dragonfly, with higher hover-style movement.",
+        "Slowed pet movement, turning, and animation timing so the mascot feels less abrupt.",
+        "Expanded the pet render area and speech bubble bounds so growing pets and text are not clipped."
+      ]
+    },
+    {
+      "version": "1.5.3",
+      "date": "2026-07-13",
+      "changes": [
+        "Added metadata conflict detection for report merges so differing metadata values are chosen explicitly instead of being concatenated.",
+        "Default metadata conflict selections use the first input file as the standard.",
+        "Expanded the web pet container and removed paint clipping so grown pets render fully."
+      ]
+    },
     {
       "version": "1.5.2",
       "date": "2026-07-08",

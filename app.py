@@ -369,13 +369,24 @@ def cleanup_files():
 @app.route('/api/merge', methods=['POST'])
 def merge_reports():
     import hashlib
-    from modules.merger import merge_xml_reports
+    from modules.merger import MetadataConflictError, merge_xml_reports
     try:
         files = request.files.getlist('files')
         flatten = request.form.get('flatten', 'false').lower() == 'true'
         update_mode = request.form.get('update_mode', 'false').lower() == 'true'
         keep_update_history = request.form.get('keep_update_history', 'true').lower() == 'true'
         update_scope = request.form.get('update_scope', 'all')
+        metadata_overrides = None
+        if request.form.get('metadata_overrides'):
+            try:
+                parsed_overrides = json.loads(request.form.get('metadata_overrides', '{}'))
+                if isinstance(parsed_overrides, dict):
+                    metadata_overrides = {
+                        str(key): str(value)
+                        for key, value in parsed_overrides.items()
+                    }
+            except json.JSONDecodeError:
+                metadata_overrides = None
         selected_update_tests = None
         if update_mode and update_scope == 'selected':
             try:
@@ -473,6 +484,8 @@ def merge_reports():
             suite_name,
             keep_update_history,
             selected_update_tests,
+            metadata_overrides,
+            [entry[0] for entry in unique_entries],
         )
 
         zip_path = RESULTS_DIR / f'{run_id}.zip'
@@ -496,6 +509,18 @@ def merge_reports():
             resp['skipped_duplicates'] = skipped_duplicates
             resp['unique_file_count'] = len(unique_entries)
         return jsonify(resp)
+    except MetadataConflictError as exc:
+        try:
+            if 'work_dir' in locals():
+                _cleanup_dir(work_dir)
+            if 'result_dir' in locals():
+                _cleanup_dir(result_dir)
+        except Exception:
+            pass
+        return jsonify({
+            'error': str(exc),
+            'metadata_conflicts': exc.conflicts,
+        }), 409
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 

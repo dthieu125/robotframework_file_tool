@@ -788,6 +788,34 @@
         </div>
 
         <div class="settings-group">
+          <div class="settings-group-title">Web Pet</div>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="web-pet-enabled" checked />
+            <label class="form-check-label" for="web-pet-enabled">Show animated pet</label>
+          </div>
+          <label class="form-label" for="web-pet-species">Pet type</label>
+          <select class="form-select" id="web-pet-species">
+            <option value="random">Random each session</option>
+            <option value="cat">Cat</option>
+            <option value="dog">Dog</option>
+            <option value="lion">Lion</option>
+            <option value="snake">Snake</option>
+            <option value="kangaroo">Kangaroo</option>
+            <option value="rabbit">Rabbit</option>
+            <option value="fox">Fox</option>
+            <option value="panda">Panda</option>
+            <option value="penguin">Penguin</option>
+            <option value="turtle">Turtle</option>
+            <option value="dragon">Dragon</option>
+            <option value="bird">Bird</option>
+            <option value="fly">Fly</option>
+            <option value="mosquito">Mosquito</option>
+            <option value="dragonfly">Dragonfly</option>
+          </select>
+          <div class="form-text">Pet preferences are saved in this browser only.</div>
+        </div>
+
+        <div class="settings-group">
           <div class="settings-group-title">Admin Usage</div>
           <div class="admin-usage-grid">
             <div class="admin-usage-metric">
@@ -819,6 +847,31 @@
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         <button class="btn btn-primary" id="merger-settings-save-btn">
           <i class="fa-solid fa-floppy-disk me-1"></i>Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Metadata conflict resolver -->
+<div class="modal fade" id="metadata-conflict-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fa-solid fa-tags me-2"></i>Choose Merged Metadata</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning py-2 px-3">
+          <i class="fa-solid fa-triangle-exclamation me-1"></i>
+          Metadata differs between the selected output files. Choose which value should appear in the final merged report.
+        </div>
+        <div id="metadata-conflict-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="metadata-conflict-apply-btn">
+          <i class="fa-solid fa-check me-1"></i>Use Selected Metadata
         </button>
       </div>
     </div>

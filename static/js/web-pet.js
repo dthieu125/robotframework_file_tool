@@ -10,7 +10,8 @@
 'use strict';
 
 (function () {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const PET_SETTINGS_KEY = 'rf-web-pet-settings';
 
   const PETS = [
     { id: 'cat', name: 'Mochi Cat', call: ['meow', 'mrrp', 'hello'], body: '#d99a62', belly: '#f3c994', accent: '#8f5d38', ears: 'point', tail: 'curl', gait: 'walk' },
@@ -23,8 +24,11 @@
     { id: 'panda', name: 'Bao Panda', call: ['nom', 'hey', 'snack?'], body: '#f2f0e8', belly: '#ffffff', accent: '#2d3137', ears: 'round', tail: 'puff', gait: 'waddle', patches: true },
     { id: 'penguin', name: 'Pixel Penguin', call: ['peep', 'waddle', 'cool'], body: '#263746', belly: '#f7f4df', accent: '#f0a542', ears: 'none', tail: 'none', gait: 'waddle', beak: true },
     { id: 'turtle', name: 'Shell Turtle', call: ['hmm', 'slowly', 'steady'], body: '#5f9b65', belly: '#c9b36b', accent: '#3d6845', ears: 'none', tail: 'short', gait: 'crawl', shell: true },
-    { id: 'dragon', name: 'Pocket Dragon', call: ['puff', 'spark', 'tiny roar'], body: '#7b6ee6', belly: '#c6baff', accent: '#4b3aa3', ears: 'horn', tail: 'spike', gait: 'prance', wings: true },
+    { id: 'dragon', name: 'Pocket Dragon', call: ['puff', 'spark', 'tiny roar'], body: '#7b6ee6', belly: '#c6baff', accent: '#4b3aa3', ears: 'horn', tail: 'spike', gait: 'fly', wings: true },
     { id: 'bird', name: 'Cloud Bird', call: ['chirp', 'tweet', 'hello'], body: '#70aee8', belly: '#d9f0ff', accent: '#315d92', ears: 'crest', tail: 'feather', gait: 'flutter', beak: true, wings: true },
+    { id: 'fly', name: 'Tiny Fly', call: ['bzz', 'zip', 'hello?'], body: '#4f5d67', belly: '#9aa8ad', accent: '#c8f0ff', ears: 'antenna', tail: 'short', gait: 'fly', wings: true, insect: true },
+    { id: 'mosquito', name: 'Mini Mosquito', call: ['zzzz', 'sip?', 'tiny hello'], body: '#59646d', belly: '#c9b3a0', accent: '#d8f5ff', ears: 'antenna', tail: 'needle', gait: 'fly', wings: true, insect: true, proboscis: true },
+    { id: 'dragonfly', name: 'Glass Dragonfly', call: ['whirr', 'glide', 'sparkle'], body: '#3f9f95', belly: '#9ee6d8', accent: '#b7f3ff', ears: 'antenna', tail: 'long', gait: 'fly', wings: true, insect: true },
   ];
 
   const STAGES = [
@@ -33,8 +37,8 @@
     { id: 'adult', label: 'Adult', at: 24 * 60 * 1000, scale: 1.08, roundness: 0.92 },
   ];
 
-  const petDef = PETS[Math.floor(Math.random() * PETS.length)];
-  const bornAt = Date.now();
+  let petDef = PETS[Math.floor(Math.random() * PETS.length)];
+  let bornAt = Date.now();
   let el;
   let animal;
   let bubble;
@@ -47,7 +51,10 @@
   let stageId = '';
   let morphBucket = -1;
   let frame = 0;
+  let facing = 1;
   let last = performance.now();
+  let rafId = 0;
+  let active = false;
   let modeUntil = 0;
   let nextSpeakAt = performance.now() + random(3500, 9000);
   let nextMoodAt = performance.now() + random(7000, 16000);
@@ -56,6 +63,40 @@
 
   function random(min, max) {
     return min + Math.random() * (max - min);
+  }
+
+  function readSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PET_SETTINGS_KEY) || '{}');
+      return {
+        enabled: saved.enabled !== false,
+        species: saved.species || 'random',
+      };
+    } catch {
+      return { enabled: true, species: 'random' };
+    }
+  }
+
+  function choosePet(settings = readSettings()) {
+    const selected = PETS.find((item) => item.id === settings.species);
+    return selected || PETS[Math.floor(Math.random() * PETS.length)];
+  }
+
+  function resetState() {
+    bornAt = Date.now();
+    pos = { x: window.innerWidth - 180, y: window.innerHeight - 126 };
+    vel = { x: 0, y: 0 };
+    target = { ...pos };
+    mode = 'settle';
+    mood = 'happy';
+    stageId = '';
+    morphBucket = -1;
+    frame = 0;
+    facing = 1;
+    last = performance.now();
+    modeUntil = 0;
+    nextSpeakAt = performance.now() + random(4500, 11000);
+    nextMoodAt = performance.now() + random(8000, 18000);
   }
 
   function stage() {
@@ -98,9 +139,11 @@
   }
 
   function init() {
+    active = true;
     el = document.createElement('div');
     el.id = 'rf-web-pet';
     el.dataset.pet = petDef.id;
+    el.dataset.gait = petDef.gait;
     el.dataset.mode = mode;
     el.dataset.mood = mood;
     el.setAttribute('aria-label', petDef.name);
@@ -121,7 +164,34 @@
     el.addEventListener('click', greet);
 
     chooseTarget('wander');
-    requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function destroy() {
+    active = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('resize', clamp);
+    window.removeEventListener('pointerdown', unlockAudio);
+    if (el) {
+      el.removeEventListener('mouseenter', flee);
+      el.removeEventListener('click', greet);
+      el.remove();
+    }
+    el = null;
+    animal = null;
+    bubble = null;
+  }
+
+  function restartFromSettings() {
+    destroy();
+    if (REDUCED_MOTION) return;
+    const settings = readSettings();
+    if (!settings.enabled) return;
+    petDef = choosePet(settings);
+    resetState();
+    init();
   }
 
   function unlockAudio() {
@@ -138,7 +208,7 @@
     const now = audioContext.currentTime;
     const osc = audioContext.createOscillator();
     const gain = audioContext.createGain();
-    const base = petDef.gait === 'slither' ? 240 : petDef.id === 'bird' ? 740 : 420;
+    const base = petDef.gait === 'slither' ? 240 : petDef.gait === 'fly' || petDef.gait === 'flutter' ? 720 : 420;
     osc.frequency.setValueAtTime(base + random(-80, 120), now);
     osc.frequency.exponentialRampToValueAtTime(base * random(1.08, 1.45), now + 0.11);
     gain.gain.setValueAtTime(0.0001, now);
@@ -187,13 +257,14 @@
   }
 
   function chooseTarget(nextMode = 'wander') {
-    const bandBottom = window.innerHeight - 68;
-    const bandTop = Math.max(120, window.innerHeight - 190);
+    const flying = petDef.gait === 'fly' || petDef.gait === 'flutter';
+    const bandBottom = flying ? Math.max(170, window.innerHeight - 118) : window.innerHeight - 68;
+    const bandTop = flying ? 110 : Math.max(120, window.innerHeight - 190);
     target = {
-      x: random(72, Math.max(96, window.innerWidth - 88)),
+      x: random(92, Math.max(116, window.innerWidth - 104)),
       y: random(bandTop, bandBottom),
     };
-    setMode(nextMode, random(1800, 5200));
+    setMode(nextMode, random(2600, 7200));
   }
 
   function flee() {
@@ -201,24 +272,26 @@
     const dy = pos.y - mouse.y || random(-0.8, 0.3);
     const len = Math.hypot(dx, dy) || 1;
     target = {
-      x: pos.x + (dx / len) * random(220, 360),
-      y: pos.y + (dy / len) * random(80, 160),
+      x: pos.x + (dx / len) * random(150, 260),
+      y: pos.y + (dy / len) * random(60, 130),
     };
     clampTarget();
-    setMode('flee', 1600);
+    setMode('flee', 1900);
     setMood('excited', 1800);
     say(petDef.id === 'snake' ? 'ss!' : 'eep!');
     chirp();
   }
 
   function clampTarget() {
-    target.x = Math.max(56, Math.min(window.innerWidth - 72, target.x));
-    target.y = Math.max(96, Math.min(window.innerHeight - 54, target.y));
+    const flying = petDef.gait === 'fly' || petDef.gait === 'flutter';
+    target.x = Math.max(78, Math.min(window.innerWidth - 86, target.x));
+    target.y = Math.max(flying ? 96 : 120, Math.min(window.innerHeight - 66, target.y));
   }
 
   function clamp() {
-    pos.x = Math.max(56, Math.min(window.innerWidth - 72, pos.x));
-    pos.y = Math.max(96, Math.min(window.innerHeight - 54, pos.y));
+    const flying = petDef.gait === 'fly' || petDef.gait === 'flutter';
+    pos.x = Math.max(78, Math.min(window.innerWidth - 86, pos.x));
+    pos.y = Math.max(flying ? 96 : 120, Math.min(window.innerHeight - 66, pos.y));
     clampTarget();
   }
 
@@ -235,7 +308,7 @@
     if (mouse.active && distanceToMouse < 460 && Math.random() < 0.012) {
       target = {
         x: mouse.x + random(-52, 64),
-        y: mouse.y + random(30, 78),
+        y: mouse.y + random(petDef.gait === 'fly' ? -34 : 30, petDef.gait === 'fly' ? 48 : 78),
       };
       clampTarget();
       setMode('curious', random(1800, 3600));
@@ -259,6 +332,7 @@
   }
 
   function tick(now) {
+    if (!active || !el) return;
     const dt = Math.min(42, now - last) / 16.67;
     last = now;
 
@@ -276,19 +350,19 @@
     behavior(now);
     move(dt);
     paint(now, growthState);
-    requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(tick);
   }
 
   function move(dt) {
     const idle = mode === 'idle' || mode === 'greet';
     const speedMap = {
-      settle: 0.36,
-      idle: 0.04,
-      greet: 0.05,
-      wander: 0.52,
-      curious: 0.74,
-      run: 1.0,
-      flee: 1.38,
+      settle: 0.18,
+      idle: 0.02,
+      greet: 0.025,
+      wander: petDef.gait === 'fly' ? 0.34 : 0.26,
+      curious: petDef.gait === 'fly' ? 0.42 : 0.34,
+      run: petDef.gait === 'fly' ? 0.58 : 0.48,
+      flee: petDef.gait === 'fly' ? 0.76 : 0.66,
     };
     const speed = speedMap[mode] || 0.5;
     const dx = target.x - pos.x;
@@ -299,8 +373,8 @@
       vel.x += (dx / len) * speed * dt;
       vel.y += (dy / len) * speed * dt;
     }
-    vel.x *= idle ? 0.82 : 0.91;
-    vel.y *= idle ? 0.82 : 0.91;
+    vel.x *= idle ? 0.78 : 0.86;
+    vel.y *= idle ? 0.78 : 0.86;
 
     pos.x += vel.x * dt;
     pos.y += vel.y * dt;
@@ -310,11 +384,13 @@
   function paint(now, growthState) {
     const speed = Math.hypot(vel.x, vel.y);
     const moving = speed > 0.2;
-    const facing = vel.x < -0.08 ? -1 : 1;
+    if (moving && Math.abs(vel.x) > 0.38) {
+      facing = vel.x < 0 ? -1 : 1;
+    }
     const cycle = now / gaitCycle();
     frame = moving ? Math.sin(cycle) : Math.sin(now / 600) * 0.12;
     const bob = moving ? gaitBob(frame) : Math.sin(now / 900) * 1.2;
-    const tilt = Math.max(-8, Math.min(8, vel.x * 1.4));
+    const tilt = Math.max(-4, Math.min(4, vel.x * 0.55));
 
     el.style.setProperty('--pet-scale', growthState.scale.toFixed(4));
     el.style.setProperty('--pet-growth', growthState.progress.toFixed(4));
@@ -325,6 +401,8 @@
   }
 
   function gaitCycle() {
+    if (petDef.gait === 'fly') return 175;
+    if (petDef.gait === 'flutter') return 155;
     if (petDef.gait === 'slither') return 115;
     if (petDef.gait === 'hop') return 92;
     if (petDef.gait === 'waddle') return 140;
@@ -333,6 +411,8 @@
   }
 
   function gaitBob(value) {
+    if (petDef.gait === 'fly') return Math.sin(performance.now() / 180) * 5 + Math.abs(value) * 1.5;
+    if (petDef.gait === 'flutter') return Math.sin(performance.now() / 210) * 4 + Math.abs(value) * 2;
     if (petDef.gait === 'slither') return Math.sin(performance.now() / 90) * 1.8;
     if (petDef.gait === 'hop') return Math.abs(value) * 9;
     if (petDef.gait === 'waddle') return Math.abs(value) * 4;
@@ -359,9 +439,9 @@
         <ellipse cx="69" cy="99" rx="43" ry="7" fill="rgba(0,0,0,.18)"/>
         ${tailSvg()}
         ${petDef.wings ? wingsSvg() : ''}
-        <g class="pet-leg pet-leg-back"><path d="${legPath('back')}" fill="${legColor}"/></g>
-        <g class="pet-leg pet-leg-front"><path d="${legPath('front')}" fill="${legColor}"/></g>
-        ${petDef.shell ? `<ellipse class="pet-body" cx="61" cy="64" rx="42" ry="28" fill="${petDef.accent}"/><path d="M28 63 C45 47 76 47 94 64 C78 83 47 84 28 63" fill="${petDef.body}"/>` : `<ellipse class="pet-body" cx="61" cy="64" rx="${bodyRx}" ry="${bodyRy}" fill="${petDef.body}"/>`}
+        <g class="pet-leg pet-leg-back"><path d="${legPath('back')}" fill="${legColor}" stroke="${petDef.insect ? legColor : 'none'}" stroke-width="${petDef.insect ? 2.2 : 0}" stroke-linecap="round"/></g>
+        <g class="pet-leg pet-leg-front"><path d="${legPath('front')}" fill="${legColor}" stroke="${petDef.insect ? legColor : 'none'}" stroke-width="${petDef.insect ? 2.2 : 0}" stroke-linecap="round"/></g>
+        ${petDef.shell ? `<ellipse class="pet-body" cx="61" cy="64" rx="42" ry="28" fill="${petDef.accent}"/><path d="M28 63 C45 47 76 47 94 64 C78 83 47 84 28 63" fill="${petDef.body}"/>` : `<ellipse class="pet-body" cx="61" cy="64" rx="${petDef.insect ? bodyRx * 0.72 : bodyRx}" ry="${petDef.insect ? bodyRy * 1.12 : bodyRy}" fill="${petDef.body}"/>`}
         <ellipse cx="64" cy="69" rx="${bodyRx * 0.58}" ry="${bodyRy * 0.55}" fill="${petDef.belly}" opacity=".82"/>
         ${petDef.pouch && adult ? '<path d="M58 69 C64 79 77 79 83 69" fill="none" stroke="rgba(80,45,25,.65)" stroke-width="3" stroke-linecap="round"/>' : ''}
         ${petDef.mane && !baby ? `<circle cx="${headX}" cy="42" r="29" fill="${petDef.accent}"/>` : ''}
@@ -371,6 +451,7 @@
           ${petDef.patches ? `<ellipse cx="${headX - 9}" cy="39" rx="8" ry="9" fill="${petDef.accent}"/><ellipse cx="${headX + 9}" cy="39" rx="8" ry="9" fill="${petDef.accent}"/>` : ''}
           ${eyesSvg(headX)}
           ${faceSvg(headX)}
+          ${petDef.proboscis ? `<path d="M${headX + 16} 50 C${headX + 27} 51 ${headX + 31} 57 ${headX + 35} 64" fill="none" stroke="${petDef.accent}" stroke-width="2" stroke-linecap="round"/>` : ''}
         </g>
       </svg>`;
   }
@@ -393,6 +474,11 @@
   }
 
   function legPath(side) {
+    if (petDef.insect) {
+      return side === 'back'
+        ? 'M51 73 C42 81 38 90 42 96 M54 71 C48 82 49 91 55 97'
+        : 'M70 72 C78 82 83 89 80 96 M75 70 C88 77 93 86 91 94';
+    }
     if (petDef.gait === 'hop') {
       return side === 'back'
         ? 'M45 70 C36 82 33 94 42 98 C52 93 57 82 61 71'
@@ -420,6 +506,7 @@
     if (petDef.ears === 'long') return `<ellipse class="pet-ear" cx="${headX - 12}" cy="20" rx="6" ry="20" fill="${petDef.body}" transform="rotate(-12 ${headX - 12} 20)"/><ellipse class="pet-ear" cx="${headX + 12}" cy="20" rx="6" ry="20" fill="${petDef.body}" transform="rotate(12 ${headX + 12} 20)"/>`;
     if (petDef.ears === 'horn') return `<path class="pet-ear" d="M${headX - 15} 25 L${headX - 9} 8 L${headX - 4} 27 Z" fill="${petDef.accent}"/><path class="pet-ear" d="M${headX + 12} 27 L${headX + 18} 8 L${headX + 22} 29 Z" fill="${petDef.accent}"/>`;
     if (petDef.ears === 'crest') return `<path class="pet-ear" d="M${headX - 5} 22 C${headX - 6} 9 ${headX + 7} 7 ${headX + 5} 23" fill="${petDef.accent}"/>`;
+    if (petDef.ears === 'antenna') return `<path class="pet-ear" d="M${headX - 8} 26 C${headX - 22} 13 ${headX - 21} 6 ${headX - 15} 8" fill="none" stroke="${petDef.accent}" stroke-width="2.4" stroke-linecap="round"/><path class="pet-ear" d="M${headX + 8} 26 C${headX + 22} 13 ${headX + 21} 6 ${headX + 15} 8" fill="none" stroke="${petDef.accent}" stroke-width="2.4" stroke-linecap="round"/>`;
     return `<path class="pet-ear" d="M${headX - 17} 29 L${headX - 10} 9 L${headX - 3} 30 Z" fill="${petDef.body}"/><path class="pet-ear" d="M${headX + 8} 30 L${headX + 17} 9 L${headX + 22} 32 Z" fill="${petDef.body}"/>`;
   }
 
@@ -459,6 +546,8 @@
     if (petDef.tail === 'balance') return `<path class="pet-tail" d="M36 69 C14 78 7 93 4 108" fill="none" stroke="${petDef.accent}" stroke-width="9" stroke-linecap="round"/>`;
     if (petDef.tail === 'spike') return `<path class="pet-tail" d="M35 65 C13 63 12 45 25 35" fill="none" stroke="${petDef.accent}" stroke-width="8" stroke-linecap="round"/><path d="M21 38 L13 34 L19 47 Z" fill="${petDef.accent}"/>`;
     if (petDef.tail === 'feather') return `<path class="pet-tail" d="M36 65 C20 66 13 56 14 45 C27 47 34 55 36 65" fill="${petDef.accent}"/>`;
+    if (petDef.tail === 'needle') return `<path class="pet-tail" d="M35 66 C22 67 15 70 8 75" fill="none" stroke="${petDef.accent}" stroke-width="2.5" stroke-linecap="round"/>`;
+    if (petDef.tail === 'long') return `<path class="pet-tail" d="M35 65 C19 64 10 66 2 72" fill="none" stroke="${petDef.body}" stroke-width="7" stroke-linecap="round"/><path d="M8 72 L3 68 L2 76 Z" fill="${petDef.accent}"/>`;
     if (petDef.tail === 'short') return `<path class="pet-tail" d="M31 67 C22 68 18 64 18 59" fill="none" stroke="${petDef.accent}" stroke-width="7" stroke-linecap="round"/>`;
     return `<circle class="pet-tail" cx="30" cy="66" r="8" fill="${petDef.accent}"/>`;
   }
@@ -467,9 +556,11 @@
     return `<path class="pet-wing pet-wing-back" d="M49 54 C28 37 21 62 41 75" fill="${petDef.accent}" opacity=".75"/><path class="pet-wing pet-wing-front" d="M75 53 C99 35 103 62 84 76" fill="${petDef.accent}" opacity=".75"/>`;
   }
 
+  window.addEventListener('rf:web-pet-settings', restartFromSettings);
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', restartFromSettings);
   } else {
-    init();
+    restartFromSettings();
   }
 })();

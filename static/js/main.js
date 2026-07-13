@@ -239,12 +239,17 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 
   let mergerFiles = [];
   const MERGER_SETTINGS_KEY = 'rf-merger-settings';
+  const PET_SETTINGS_KEY = 'rf-web-pet-settings';
   const MERGER_SETTINGS_VERSION = 2;
   const mergerSettings = {
     version: MERGER_SETTINGS_VERSION,
     updateHistory: 'latest',
     clearInputsAfterMerge: false,
     cleanupAgeHours: 24,
+  };
+  const petSettings = {
+    enabled: true,
+    species: 'random',
   };
 
   /**
@@ -256,6 +261,8 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   let updateCandidates = [];
   let selectedUpdateTests = new Set();
   let updateCandidatesDirty = true;
+  let metadataOverridesForNextMerge = null;
+  let pendingMetadataConflicts = [];
 
   function readMergerSettings() {
     try {
@@ -267,11 +274,23 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     } catch { /* keep defaults */ }
   }
 
+  function readPetSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PET_SETTINGS_KEY) || '{}');
+      petSettings.enabled = saved.enabled !== false;
+      petSettings.species = saved.species || 'random';
+    } catch { /* keep defaults */ }
+  }
+
   function applyMergerSettingsToUi() {
     const historyEl = document.querySelector(`input[name="merger-history-setting"][value="${mergerSettings.updateHistory}"]`);
     if (historyEl) historyEl.checked = true;
     document.getElementById('merger-clear-inputs-after-merge').checked = !!mergerSettings.clearInputsAfterMerge;
     document.getElementById('cleanup-age-hours').value = mergerSettings.cleanupAgeHours || 24;
+    const petEnabledEl = document.getElementById('web-pet-enabled');
+    const petSpeciesEl = document.getElementById('web-pet-species');
+    if (petEnabledEl) petEnabledEl.checked = petSettings.enabled !== false;
+    if (petSpeciesEl) petSpeciesEl.value = petSpeciesEl.querySelector(`option[value="${petSettings.species}"]`) ? petSettings.species : 'random';
   }
 
   function collectMergerSettingsFromUi() {
@@ -283,10 +302,18 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       Math.max(1, parseInt(document.getElementById('cleanup-age-hours').value, 10) || 24);
     mergerSettings.version = MERGER_SETTINGS_VERSION;
     localStorage.setItem(MERGER_SETTINGS_KEY, JSON.stringify(mergerSettings));
+
+    const petEnabledEl = document.getElementById('web-pet-enabled');
+    const petSpeciesEl = document.getElementById('web-pet-species');
+    petSettings.enabled = petEnabledEl ? petEnabledEl.checked : true;
+    petSettings.species = petSpeciesEl?.value || 'random';
+    localStorage.setItem(PET_SETTINGS_KEY, JSON.stringify(petSettings));
+    window.dispatchEvent(new CustomEvent('rf:web-pet-settings', { detail: { ...petSettings } }));
   }
 
   async function loadServerSettings() {
     readMergerSettings();
+    readPetSettings();
     try {
       const res = await fetch('/api/settings');
       if (res.ok) {
@@ -310,6 +337,8 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     updateCandidates = [];
     selectedUpdateTests = new Set();
     updateCandidatesDirty = true;
+    metadataOverridesForNextMerge = null;
+    pendingMetadataConflicts = [];
     document.getElementById('merger-file-input').value = '';
     document.getElementById('merger-file-list').innerHTML = '';
     document.getElementById('merger-suite-name-select').innerHTML = '<option value="__auto__">Auto-detect from files</option>';
@@ -379,6 +408,8 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     updateCandidates = [];
     selectedUpdateTests = new Set();
     updateCandidatesDirty = true;
+    metadataOverridesForNextMerge = null;
+    pendingMetadataConflicts = [];
     renderUpdateCandidates();
   }
 
@@ -500,6 +531,42 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     e.preventDefault();
     selectedUpdateTests = new Set();
     renderUpdateCandidates();
+  });
+
+  function showMetadataConflictModal(conflicts) {
+    pendingMetadataConflicts = conflicts || [];
+    const list = document.getElementById('metadata-conflict-list');
+    list.innerHTML = pendingMetadataConflicts.map((conflict, conflictIndex) => `
+      <div class="metadata-conflict-item">
+        <div class="metadata-conflict-key">${escapeHtml(conflict.key)}</div>
+        ${(conflict.choices || []).map((choice, choiceIndex) => {
+          const id = `metadata-choice-${conflictIndex}-${choiceIndex}`;
+          const valueLabel = choice.value === '' ? '(not set)' : choice.value;
+          return `
+            <label class="metadata-choice" for="${id}">
+              <input class="form-check-input me-2 metadata-choice-input" type="radio"
+                     id="${id}" name="metadata-conflict-${conflictIndex}"
+                     value="${escapeHtml(choice.value)}" ${choiceIndex === 0 ? 'checked' : ''} />
+              <span class="metadata-choice-value">${escapeHtml(valueLabel)}</span>
+              <span class="metadata-choice-source">
+                ${choiceIndex === 0 ? 'Default from first matching file' : 'From'}: ${escapeHtml(choice.file_name || `File ${choice.file_index + 1}`)}
+              </span>
+            </label>`;
+        }).join('')}
+      </div>
+    `).join('');
+    new bootstrap.Modal(document.getElementById('metadata-conflict-modal')).show();
+  }
+
+  document.getElementById('metadata-conflict-apply-btn').addEventListener('click', () => {
+    const overrides = {};
+    pendingMetadataConflicts.forEach((conflict, index) => {
+      const selected = document.querySelector(`input[name="metadata-conflict-${index}"]:checked`);
+      if (selected) overrides[conflict.key] = selected.value;
+    });
+    metadataOverridesForNextMerge = overrides;
+    bootstrap.Modal.getInstance(document.getElementById('metadata-conflict-modal'))?.hide();
+    document.getElementById('merger-btn').click();
   });
 
   // --- Suite metadata helpers --------------------------------------------
@@ -712,6 +779,9 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     fd.append('update_mode', isUpdateMode);
     fd.append('update_scope', updateScope);
     fd.append('keep_update_history', mergerSettings.updateHistory === 'keep');
+    if (metadataOverridesForNextMerge) {
+      fd.append('metadata_overrides', JSON.stringify(metadataOverridesForNextMerge));
+    }
     if (isUpdateMode && updateScope === 'selected') {
       fd.append('selected_update_tests', JSON.stringify([...selectedUpdateTests]));
     }
@@ -728,7 +798,12 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     try {
       const res = await fetch('/api/merge', { method: 'POST', body: fd });
       const data = await res.json();
+      if (res.status === 409 && data.metadata_conflicts) {
+        showMetadataConflictModal(data.metadata_conflicts);
+        return;
+      }
       if (!res.ok || data.error) throw new Error(data.error || 'Merge failed');
+      metadataOverridesForNextMerge = null;
 
       if (data.skipped_duplicates && data.skipped_duplicates.length > 0) {
         const dupNames = data.skipped_duplicates.map(n => `"${n}"`).join(', ');

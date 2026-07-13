@@ -76,7 +76,7 @@ Upload limit is 200 MB. Runtime files are stored in `uploads/` and `results/`; b
 | File Statistics | Analyze Robot files and list test cases, keywords, settings, variables, line numbers, and source content. |
 | Test Runner | Upload and run a `.robot` file, stream console output in real time, and download generated results. |
 | Name Formatter | Preview and apply bulk test case rename rules such as regex replacement, prefix/suffix, templates, and numbering. |
-| Web Pet | A lightweight animated pet mascot that wanders around the app, grows over time, and reacts to the mouse cursor. |
+| Web Pet | A lightweight animated pet mascot that wanders around the app, grows over time, reacts to the mouse cursor, and can be disabled or pinned to a chosen pet type from Settings. |
 
 The Web Pet is inspired by open-source web mascot and virtual pet projects,
 including Tamaweb, but uses local SVG drawings and app-specific behavior rather
@@ -98,6 +98,10 @@ The web Report Merger supports two merge modes:
 - Combine: include tests from all input files.
 - Update / Replace: later files replace same-named tests from earlier files, using Robot Framework `rebot --merge`.
   By default all matching tests are replaced; the web UI can also list matching test cases so you can choose only the tests whose result/log should be overwritten.
+
+If uploaded reports contain different suite metadata values, the web UI asks
+which value should appear in the final merged report. The default choice is the
+metadata value from the first input file.
 
 Report Merger settings include:
 

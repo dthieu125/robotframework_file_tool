@@ -233,6 +233,41 @@ def list_update_candidates(xml_paths: list[str], file_names: list[str] | None = 
     return sorted(candidates.values(), key=lambda item: item['name'].lower())
 
 
+class MetadataConflictError(RuntimeError):
+    def __init__(self, conflicts: list[dict]):
+        super().__init__('Metadata differs between input files.')
+        self.conflicts = conflicts
+
+
+def _metadata_conflicts_from_suites(suites: list, file_names: list[str] | None = None) -> list[dict]:
+    all_keys: list[str] = []
+    for suite in suites:
+        for key in suite.metadata:
+            text_key = str(key)
+            if text_key not in all_keys:
+                all_keys.append(text_key)
+
+    values_by_key: dict[str, list[dict]] = {key: [] for key in all_keys}
+    for idx, suite in enumerate(suites):
+        file_name = file_names[idx] if file_names and idx < len(file_names) else Path(str(getattr(suite, 'source', '') or f'File {idx + 1}')).name
+        for key in all_keys:
+            text = str(suite.metadata.get(key, ''))
+            choices = values_by_key.setdefault(key, [])
+            if not any(choice['value'] == text for choice in choices):
+                choices.append({
+                    'value': text,
+                    'file_index': idx,
+                    'file_name': file_name,
+                    'is_default': len(choices) == 0,
+                })
+
+    return [
+        {'key': key, 'choices': choices}
+        for key, choices in sorted(values_by_key.items())
+        if len(choices) > 1
+    ]
+
+
 def _suite_has_tests(suite: ET.Element) -> bool:
     if _child_elements(suite, 'test'):
         return True
@@ -304,6 +339,8 @@ def merge_xml_reports(
     suite_name: str | None = None,
     keep_update_history: bool = True,
     selected_update_tests: list[str] | None = None,
+    metadata_overrides: dict[str, str] | None = None,
+    file_names: list[str] | None = None,
 ) -> dict:
     """
     Merge Robot Framework output XML files.
@@ -475,19 +512,24 @@ def merge_xml_reports(
     else:
         merged.suite.name = output_name or 'Merged Results'
 
+    metadata_conflicts = _metadata_conflicts_from_suites(suites_to_process, file_names)
+    if metadata_conflicts and metadata_overrides is None:
+        raise MetadataConflictError(metadata_conflicts)
+
     combined_metadata: dict = {}
+    first_metadata = dict(suites_to_process[0].metadata) if suites_to_process else {}
+    for key, value in first_metadata.items():
+        combined_metadata[str(key)] = value
+    if metadata_overrides:
+        for key, value in metadata_overrides.items():
+            if value == '':
+                combined_metadata.pop(str(key), None)
+            else:
+                combined_metadata[str(key)] = value
+
     all_tests: list = []
 
     for sub in suites_to_process:
-        # Merge metadata: keep unique values, join duplicates with ", "
-        for key, value in sub.metadata.items():
-            if key in combined_metadata:
-                existing = [v.strip() for v in str(combined_metadata[key]).split(',')]
-                if str(value) not in existing:
-                    combined_metadata[key] = f"{combined_metadata[key]}, {value}"
-            else:
-                combined_metadata[key] = value
-
         for test in sub.tests:
             # Append source file info to each test's doc (like refs code)
             source_info = f"Source: {sub.source}"
