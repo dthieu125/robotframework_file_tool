@@ -225,10 +225,22 @@
   }
 
   function say(text) {
+    if (!bubble) return;
     bubble.textContent = text;
     bubble.classList.add('visible');
     window.clearTimeout(say.timer);
     say.timer = window.setTimeout(() => bubble.classList.remove('visible'), 2200);
+  }
+
+  function assistantSay(event) {
+    if (!el) return;
+    const detail = event.detail || {};
+    const message = String(detail.message || '').trim();
+    if (!message) return;
+    setMood(detail.mood || 'happy', 2400);
+    setMode('greet', 1400);
+    say(message);
+    chirp();
   }
 
   function greet() {
@@ -557,6 +569,7 @@
   }
 
   window.addEventListener('rf:web-pet-settings', restartFromSettings);
+  window.addEventListener('rf:web-pet-say', assistantSay);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', restartFromSettings);

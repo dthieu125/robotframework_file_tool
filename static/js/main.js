@@ -80,6 +80,15 @@ function setupDropzone(dropzone, fileInput, onFile, multiple = false) {
   });
 }
 
+function notifyPetAssistant(message, mood = 'happy') {
+  window.dispatchEvent(new CustomEvent('rf:web-pet-say', {
+    detail: {
+      message: String(message || '').slice(0, 90),
+      mood,
+    },
+  }));
+}
+
 /* ===================================================================
    THEME TOGGLE
 =================================================================== */
@@ -156,6 +165,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       const label = document.getElementById('app-version-label');
       if (label) label.textContent = `${data.display} — EN + Dark/Light mode`;
       showToast(`App has been updated to ${data.display}. Reloading...`, 'info');
+      notifyPetAssistant(`Updated to ${data.display}`, 'excited');
       setTimeout(() => window.location.reload(), 1600);
     } catch {
       // The development server may be restarting. The next poll will catch up.
@@ -622,6 +632,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       </div>
     `).join('');
     new bootstrap.Modal(document.getElementById('metadata-conflict-modal')).show();
+    notifyPetAssistant('Metadata needs a choice', 'excited');
   }
 
   document.getElementById('metadata-conflict-apply-btn').addEventListener('click', () => {
@@ -944,6 +955,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       if (!res.ok || data.error) throw new Error(data.error || 'Preview failed');
       renderPreview(data);
       showToast('Merge preview is ready', 'success');
+      notifyPetAssistant('Preview is ready', 'happy');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -1024,6 +1036,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
       renderFlakyResults(data);
       const count = data.summary?.flaky_tests || 0;
       showToast(count ? `Detected ${count} flaky test(s)` : 'No flaky tests detected', count ? 'warning' : 'success');
+      notifyPetAssistant(count ? `${count} flaky test${count === 1 ? '' : 's'} found` : 'No flaky tests found', count ? 'excited' : 'happy');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -1138,8 +1151,10 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
           ? `Update complete! ${data.selective_update_count || selectedUpdateTests.size} selected test result(s) replaced.`
           : `Update complete! ${fileCount} file(s) processed — matching tests replaced.`;
         showToast(msg, 'success');
+        notifyPetAssistant(data.update_scope === 'selected' ? 'Selected updates done' : 'Update complete', 'excited');
       } else {
         showToast(`Successfully merged ${fileCount} file(s)!`, 'success');
+        notifyPetAssistant('Merge complete', 'excited');
       }
       if (mergerSettings.clearInputsAfterMerge) {
         clearMergerInputs();
