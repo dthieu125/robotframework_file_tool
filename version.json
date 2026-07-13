@@ -1,8 +1,18 @@
 {
-  "version": "1.5.4",
+  "version": "1.6.0",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.6.0",
+      "date": "2026-07-13",
+      "changes": [
+        "Added Merge Preview / Diff to inspect file counts, overlapping tests, status transitions, metadata conflicts, and update impact before generating merged reports.",
+        "Added Flaky Test Detector for uploaded output.xml files to identify tests whose status changes across runs.",
+        "Added a lightweight Admin Dashboard with active clients, running jobs, temporary storage, client details, and recent runner jobs.",
+        "Added friendly Web Pet assistant notifications for merge previews, metadata conflicts, flaky detection, merge completion, and app updates."
+      ]
+    },
     {
       "version": "1.5.4",
       "date": "2026-07-13",
@@ -88,6 +98,14 @@
       "description": "In Update / Replace mode, keep the default all-test update or load matching test cases and select only the results/logs you want to overwrite."
     },
     {
+      "title": "Merge Preview",
+      "description": "Preview status transitions, overlapping tests, metadata conflicts, and update impact before creating merged output files."
+    },
+    {
+      "title": "Flaky Detector",
+      "description": "Upload multiple output.xml files to find test cases that switch between PASS, FAIL, SKIP, or other statuses across runs."
+    },
+    {
       "title": "Statistics",
       "description": "Upload or paste a .robot/.resource file to inspect test cases, keywords, variables, settings, and source lines."
     },
@@ -101,7 +119,11 @@
     },
     {
       "title": "Web Pet",
-      "description": "A small animated pet roams around the app, grows over time, sometimes visits the mouse, and moves away when hovered."
+      "description": "A small animated pet roams around the app, grows over time, reacts to the mouse, and announces useful app events when enabled."
+    },
+    {
+      "title": "Admin Dashboard",
+      "description": "Monitor active browsers, running jobs, temporary storage usage, and recent runner jobs from the Admin panel."
     }
   ],
   "cli": {

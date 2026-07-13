@@ -280,62 +280,6 @@ def build_merge_preview(
         if len({item['file_index'] for item in items}) > 1
     }
 
-
-def detect_flaky_tests(xml_paths: list[str], file_names: list[str] | None = None) -> dict:
-    """Detect tests whose status changes across uploaded output files."""
-    if file_names is None:
-        file_names = [Path(path).name for path in xml_paths]
-
-    by_name: dict[str, list[dict]] = {}
-    total_occurrences = 0
-    for idx, path in enumerate(xml_paths):
-        file_name = file_names[idx] if idx < len(file_names) else Path(path).name
-        for occ in _read_test_occurrences(path, idx, file_name):
-            total_occurrences += 1
-            by_name.setdefault(occ['name'], []).append(occ)
-
-    flaky: list[dict] = []
-    stable: list[dict] = []
-    for name, occurrences in by_name.items():
-        statuses = [occ.get('status') or 'UNKNOWN' for occ in occurrences]
-        status_counts = Counter(statuses)
-        ordered = sorted(occurrences, key=lambda item: item['file_index'])
-        item = {
-            'name': name,
-            'runs': len(occurrences),
-            'status_counts': dict(sorted(status_counts.items())),
-            'first_status': statuses[0],
-            'last_status': ordered[-1].get('status') or 'UNKNOWN',
-            'last_file': ordered[-1].get('file_name', ''),
-            'suites': sorted({occ.get('suite', '') for occ in occurrences if occ.get('suite')}),
-            'files': [
-                {
-                    'file_index': occ.get('file_index', 0),
-                    'file_name': occ.get('file_name', ''),
-                    'status': occ.get('status') or 'UNKNOWN',
-                    'message': occ.get('message', ''),
-                }
-                for occ in ordered
-            ],
-        }
-        if len(status_counts) > 1:
-            item['flaky_score'] = len(status_counts) * 10 + len(occurrences)
-            flaky.append(item)
-        else:
-            stable.append(item)
-
-    flaky.sort(key=lambda item: (-item['flaky_score'], item['name'].lower()))
-    return {
-        'success': True,
-        'summary': {
-            'file_count': len(xml_paths),
-            'total_tests_seen': total_occurrences,
-            'unique_test_names': len(by_name),
-            'flaky_tests': len(flaky),
-            'stable_tests': len(stable),
-        },
-        'flaky': flaky[:150],
-    }
     status_transitions = []
     transition_counts = Counter()
     for name, items in repeated.items():
@@ -404,6 +348,63 @@ def detect_flaky_tests(xml_paths: list[str], file_names: list[str] | None = None
         'metadata_conflicts': _metadata_conflicts_from_xml(xml_paths, file_names),
         'status_changes': sorted(status_transitions, key=lambda item: item['name'].lower())[:80],
         'update_changes': sorted(update_changes, key=lambda item: item['name'].lower())[:120],
+    }
+
+
+def detect_flaky_tests(xml_paths: list[str], file_names: list[str] | None = None) -> dict:
+    """Detect tests whose status changes across uploaded output files."""
+    if file_names is None:
+        file_names = [Path(path).name for path in xml_paths]
+
+    by_name: dict[str, list[dict]] = {}
+    total_occurrences = 0
+    for idx, path in enumerate(xml_paths):
+        file_name = file_names[idx] if idx < len(file_names) else Path(path).name
+        for occ in _read_test_occurrences(path, idx, file_name):
+            total_occurrences += 1
+            by_name.setdefault(occ['name'], []).append(occ)
+
+    flaky: list[dict] = []
+    stable: list[dict] = []
+    for name, occurrences in by_name.items():
+        statuses = [occ.get('status') or 'UNKNOWN' for occ in occurrences]
+        status_counts = Counter(statuses)
+        ordered = sorted(occurrences, key=lambda item: item['file_index'])
+        item = {
+            'name': name,
+            'runs': len(occurrences),
+            'status_counts': dict(sorted(status_counts.items())),
+            'first_status': statuses[0],
+            'last_status': ordered[-1].get('status') or 'UNKNOWN',
+            'last_file': ordered[-1].get('file_name', ''),
+            'suites': sorted({occ.get('suite', '') for occ in occurrences if occ.get('suite')}),
+            'files': [
+                {
+                    'file_index': occ.get('file_index', 0),
+                    'file_name': occ.get('file_name', ''),
+                    'status': occ.get('status') or 'UNKNOWN',
+                    'message': occ.get('message', ''),
+                }
+                for occ in ordered
+            ],
+        }
+        if len(status_counts) > 1:
+            item['flaky_score'] = len(status_counts) * 10 + len(occurrences)
+            flaky.append(item)
+        else:
+            stable.append(item)
+
+    flaky.sort(key=lambda item: (-item['flaky_score'], item['name'].lower()))
+    return {
+        'success': True,
+        'summary': {
+            'file_count': len(xml_paths),
+            'total_tests_seen': total_occurrences,
+            'unique_test_names': len(by_name),
+            'flaky_tests': len(flaky),
+            'stable_tests': len(stable),
+        },
+        'flaky': flaky[:150],
     }
 
 
