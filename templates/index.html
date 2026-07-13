@@ -35,6 +35,9 @@
     <a class="nav-item" data-panel="runner" href="#">
       <i class="fa-solid fa-play-circle"></i><span>Test Runner</span>
     </a>
+    <a class="nav-item" data-panel="template-builder" href="#">
+      <i class="fa-solid fa-file-circle-plus"></i><span>Template Builder</span>
+    </a>
     <a class="nav-item" data-panel="formatter" href="#">
       <i class="fa-solid fa-pen-to-square"></i><span>Name Formatter</span>
     </a>
@@ -550,6 +553,116 @@
 
 
   <!-- ─── PANEL: NAME FORMATTER ────────────────────────────────────── -->
+  <section id="panel-template-builder" class="panel">
+    <div class="panel-header">
+      <h2><i class="fa-solid fa-file-circle-plus me-2"></i>Robot Template Builder</h2>
+      <p class="text-muted">Generate reusable Robot Framework file templates, save your own presets, and share them with teammates.</p>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-5">
+        <div class="card mb-3">
+          <div class="card-header"><i class="fa-solid fa-layer-group me-2"></i>Template Library</div>
+          <div class="card-body">
+            <label class="form-label">Saved template</label>
+            <select class="form-select mb-3" id="tpl-library-select"></select>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-primary" id="tpl-load-btn">
+                <i class="fa-solid fa-folder-open me-1"></i>Load
+              </button>
+              <button class="btn btn-outline-success" id="tpl-save-btn">
+                <i class="fa-solid fa-floppy-disk me-1"></i>Save
+              </button>
+              <button class="btn btn-outline-secondary" id="tpl-export-btn">
+                <i class="fa-solid fa-file-export me-1"></i>Export JSON
+              </button>
+              <button class="btn btn-outline-secondary" id="tpl-import-btn">
+                <i class="fa-solid fa-file-import me-1"></i>Import JSON
+              </button>
+              <input type="file" id="tpl-import-input" accept=".json" style="display:none" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><i class="fa-solid fa-pen-ruler me-2"></i>Template Details</div>
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="form-label">Template name</label>
+              <input type="text" class="form-control" id="tpl-name" placeholder="Web smoke test template" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Suite name</label>
+              <input type="text" class="form-control" id="tpl-suite-name" placeholder="Example Web Suite" />
+            </div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Libraries <span class="text-muted small">(one per line)</span></label>
+                <textarea class="form-control font-mono" id="tpl-libraries" rows="4" placeholder="SeleniumLibrary&#10;Collections"></textarea>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Resources <span class="text-muted small">(one per line)</span></label>
+                <textarea class="form-control font-mono" id="tpl-resources" rows="4" placeholder="resources/common.resource"></textarea>
+              </div>
+            </div>
+            <div class="mt-3">
+              <label class="form-label">Variables <span class="text-muted small">(NAME=value, one per line)</span></label>
+              <textarea class="form-control font-mono" id="tpl-variables" rows="4" placeholder="BASE_URL=https://example.com&#10;BROWSER=chrome"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-7">
+        <div class="card">
+          <div class="card-header"><i class="fa-solid fa-list-check me-2"></i>Test Structure</div>
+          <div class="card-body">
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Suite setup</label>
+                <input type="text" class="form-control font-mono" id="tpl-suite-setup" placeholder="Open Browser To Base URL" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Suite teardown</label>
+                <input type="text" class="form-control font-mono" id="tpl-suite-teardown" placeholder="Close All Browsers" />
+              </div>
+            </div>
+            <div class="mt-3">
+              <label class="form-label">Default tags <span class="text-muted small">(space separated)</span></label>
+              <input type="text" class="form-control font-mono" id="tpl-tags" placeholder="smoke regression" />
+            </div>
+            <div class="mt-3">
+              <label class="form-label">Test cases <span class="text-muted small">(one name per line)</span></label>
+              <textarea class="form-control font-mono" id="tpl-test-cases" rows="5" placeholder="Login Should Succeed&#10;Search Should Return Results"></textarea>
+            </div>
+            <div class="mt-3">
+              <label class="form-label">Default steps <span class="text-muted small">(Robot syntax, reused in each test)</span></label>
+              <textarea class="form-control font-mono" id="tpl-steps" rows="7" placeholder="Log    TODO: implement this test&#10;Should Be True    ${TRUE}"></textarea>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button class="btn btn-primary" id="tpl-generate-btn">
+                <i class="fa-solid fa-wand-magic-sparkles me-2"></i>Generate Preview
+              </button>
+              <button class="btn btn-outline-secondary" id="tpl-copy-btn">
+                <i class="fa-solid fa-copy me-1"></i>Copy
+              </button>
+              <button class="btn btn-success" id="tpl-download-btn">
+                <i class="fa-solid fa-download me-1"></i>Download .robot
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mt-3">
+          <div class="card-header"><i class="fa-solid fa-code me-2"></i>Generated Robot File</div>
+          <div class="card-body p-0">
+            <pre class="template-preview mb-0" id="tpl-preview"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="panel-formatter" class="panel">
     <div class="panel-header">
       <h2><i class="fa-solid fa-pen-to-square me-2"></i>Name Formatter</h2>
@@ -896,21 +1009,6 @@
             <option value="dragonfly">Dragonfly</option>
           </select>
           <div class="form-text">Pet preferences are saved in this browser only.</div>
-        </div>
-
-        <div class="settings-group">
-          <div class="settings-group-title">Admin Usage</div>
-          <div class="admin-usage-grid">
-            <div class="admin-usage-metric">
-              <span class="admin-usage-value" id="admin-active-clients">0</span>
-              <span class="admin-usage-label">active clients</span>
-            </div>
-            <div class="admin-usage-metric">
-              <span class="admin-usage-value" id="admin-running-jobs">0</span>
-              <span class="admin-usage-label">running jobs</span>
-            </div>
-          </div>
-          <div class="form-text mt-2" id="admin-usage-note">Clients are counted from browser heartbeats.</div>
         </div>
 
         <div class="settings-group mb-0">

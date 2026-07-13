@@ -876,34 +876,6 @@ body {
 .settings-item-name { font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); }
 .settings-item-meta { color: var(--text-muted); font-size: 12px; margin-top: 1px; }
 
-.admin-usage-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.admin-usage-metric {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  padding: 10px 12px;
-}
-
-.admin-usage-value {
-  display: block;
-  color: var(--text-primary);
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.admin-usage-label {
-  display: block;
-  color: var(--text-muted);
-  font-size: 12px;
-  margin-top: 2px;
-}
-
 .admin-dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -950,6 +922,19 @@ body {
 
 .admin-job-row:last-child {
   border-bottom: none;
+}
+
+.template-preview {
+  min-height: 420px;
+  max-height: 640px;
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg-code);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
 }
 
 .about-section {
@@ -1034,6 +1019,7 @@ body {
   --pet-scale: 0.82;
   --pet-frame: 0;
   --pet-speed: 0;
+  --pet-facing: 1;
   position: fixed;
   left: -110px;
   top: -136px;
@@ -1093,7 +1079,8 @@ body {
   font-size: 11px;
   box-shadow: var(--shadow-sm);
   opacity: 0;
-  transform: translateY(5px);
+  transform: scaleX(var(--pet-facing)) translateY(5px);
+  transform-origin: center;
   transition: opacity .18s ease, transform .18s ease;
   pointer-events: none;
   white-space: normal;
@@ -1105,7 +1092,7 @@ body {
 
 #rf-web-pet .rf-pet-speech.visible {
   opacity: .96;
-  transform: translateY(0);
+  transform: scaleX(var(--pet-facing)) translateY(0);
 }
 
 #rf-web-pet[data-moving="true"] .pet-leg-front {

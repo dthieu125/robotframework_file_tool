@@ -1,6 +1,6 @@
 /**
  * Robot Framework Web Tool – main.js
- * Single-page application logic for all 4 features.
+ * Single-page application logic for the web tool features.
  */
 
 'use strict';
@@ -204,15 +204,6 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   }
 
   function renderUsage(data) {
-    const activeEl = document.getElementById('admin-active-clients');
-    const jobsEl = document.getElementById('admin-running-jobs');
-    const noteEl = document.getElementById('admin-usage-note');
-    if (activeEl) activeEl.textContent = data.active_clients ?? 0;
-    if (jobsEl) jobsEl.textContent = data.running_jobs ?? 0;
-    if (noteEl) {
-      noteEl.textContent = `Clients are counted from browser heartbeats within ${data.ttl_seconds || 45}s.`;
-    }
-
     const pageActiveEl = document.getElementById('admin-page-active-clients');
     const pageJobsEl = document.getElementById('admin-page-running-jobs');
     const pageStorageEl = document.getElementById('admin-page-storage-total');
@@ -1714,7 +1705,244 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
 })();
 
 /* ===================================================================
-   4. NAME FORMATTER
+   4. ROBOT TEMPLATE BUILDER
+=================================================================== */
+
+(function () {
+  const root = document.getElementById('panel-template-builder');
+  if (!root) return;
+
+  const STORAGE_KEY = 'rf-robot-file-templates';
+  const builtInTemplates = [
+    {
+      id: 'builtin-web-smoke',
+      name: 'Web smoke test',
+      suiteName: 'Web Smoke Suite',
+      libraries: 'SeleniumLibrary',
+      resources: 'resources/common.resource',
+      variables: 'BASE_URL=https://example.com\nBROWSER=chrome',
+      suiteSetup: 'Open Browser    ${BASE_URL}    ${BROWSER}',
+      suiteTeardown: 'Close All Browsers',
+      tags: 'smoke web',
+      testCases: 'Login Should Succeed\nSearch Should Return Results',
+      steps: 'Log    TODO: implement this test\nShould Be True    ${TRUE}',
+      builtIn: true,
+    },
+    {
+      id: 'builtin-api-regression',
+      name: 'API regression test',
+      suiteName: 'API Regression Suite',
+      libraries: 'RequestsLibrary\nCollections',
+      resources: '',
+      variables: 'BASE_URL=https://api.example.com\nTOKEN=replace-me',
+      suiteSetup: 'Create Session    api    ${BASE_URL}',
+      suiteTeardown: '',
+      tags: 'api regression',
+      testCases: 'Health Check Should Pass\nCreate Resource Should Succeed',
+      steps: 'Log    TODO: call API and assert response\nShould Be True    ${TRUE}',
+      builtIn: true,
+    },
+  ];
+
+  const fields = {
+    name: document.getElementById('tpl-name'),
+    suiteName: document.getElementById('tpl-suite-name'),
+    libraries: document.getElementById('tpl-libraries'),
+    resources: document.getElementById('tpl-resources'),
+    variables: document.getElementById('tpl-variables'),
+    suiteSetup: document.getElementById('tpl-suite-setup'),
+    suiteTeardown: document.getElementById('tpl-suite-teardown'),
+    tags: document.getElementById('tpl-tags'),
+    testCases: document.getElementById('tpl-test-cases'),
+    steps: document.getElementById('tpl-steps'),
+  };
+  const librarySelect = document.getElementById('tpl-library-select');
+  const importInput = document.getElementById('tpl-import-input');
+  const previewEl = document.getElementById('tpl-preview');
+
+  function lines(value) {
+    return String(value || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  }
+
+  function slug(value, fallback = 'robot_template') {
+    return String(value || fallback)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || fallback;
+  }
+
+  function readSavedTemplates() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function writeSavedTemplates(templates) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+  }
+
+  function allTemplates() {
+    return [...builtInTemplates, ...readSavedTemplates()];
+  }
+
+  function collectTemplate() {
+    return Object.fromEntries(Object.entries(fields).map(([key, el]) => [key, el.value.trim()]));
+  }
+
+  function applyTemplate(template) {
+    Object.entries(fields).forEach(([key, el]) => {
+      el.value = template[key] || '';
+    });
+    renderTemplate();
+  }
+
+  function renderTemplateOptions() {
+    const selected = librarySelect.value;
+    librarySelect.innerHTML = allTemplates().map(template => `
+      <option value="${escapeHtml(template.id)}">${template.builtIn ? 'Built-in: ' : ''}${escapeHtml(template.name)}</option>
+    `).join('');
+    if ([...librarySelect.options].some(option => option.value === selected)) {
+      librarySelect.value = selected;
+    }
+  }
+
+  function robotVariableLine(line) {
+    const idx = line.indexOf('=');
+    if (idx === -1) return line;
+    let name = line.slice(0, idx).trim();
+    if (name.startsWith('${') && name.endsWith('}')) {
+      name = name.slice(2, -1);
+    } else if (name.startsWith('$')) {
+      name = name.slice(1);
+    }
+    const value = line.slice(idx + 1).trim();
+    return `\${${name}}    ${value}`;
+  }
+
+  function renderTemplate() {
+    const data = collectTemplate();
+    const output = [];
+    output.push('*** Settings ***');
+    if (data.suiteName) output.push(`Documentation    ${data.suiteName}`);
+    lines(data.libraries).forEach(item => output.push(`Library    ${item}`));
+    lines(data.resources).forEach(item => output.push(`Resource    ${item}`));
+    if (data.suiteSetup) output.push(`Suite Setup    ${data.suiteSetup}`);
+    if (data.suiteTeardown) output.push(`Suite Teardown    ${data.suiteTeardown}`);
+
+    const vars = lines(data.variables);
+    if (vars.length) {
+      output.push('', '*** Variables ***');
+      vars.forEach(item => output.push(robotVariableLine(item)));
+    }
+
+    const tests = lines(data.testCases);
+    const steps = lines(data.steps);
+    output.push('', '*** Test Cases ***');
+    (tests.length ? tests : ['Example Test Case']).forEach(testName => {
+      output.push(testName);
+      if (data.tags) output.push(`    [Tags]    ${data.tags.split(/\s+/).filter(Boolean).join('    ')}`);
+      if (steps.length) {
+        steps.forEach(step => output.push(`    ${step}`));
+      } else {
+        output.push('    Log    TODO: implement this test');
+      }
+      output.push('');
+    });
+
+    previewEl.textContent = output.join('\n').trimEnd() + '\n';
+    return previewEl.textContent;
+  }
+
+  function downloadText(filename, text, mime = 'text/plain') {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('tpl-load-btn').addEventListener('click', () => {
+    const template = allTemplates().find(item => item.id === librarySelect.value);
+    if (!template) return;
+    applyTemplate(template);
+    showToast(`Loaded template "${template.name}"`, 'success');
+  });
+
+  document.getElementById('tpl-save-btn').addEventListener('click', () => {
+    const data = collectTemplate();
+    if (!data.name) {
+      showToast('Please enter a template name before saving', 'warning');
+      return;
+    }
+    const saved = readSavedTemplates();
+    const id = `custom-${slug(data.name)}`;
+    const next = { ...data, id, builtIn: false };
+    const existingIndex = saved.findIndex(item => item.id === id);
+    if (existingIndex >= 0) saved[existingIndex] = next;
+    else saved.push(next);
+    writeSavedTemplates(saved);
+    renderTemplateOptions();
+    librarySelect.value = id;
+    showToast('Template saved in this browser', 'success');
+  });
+
+  document.getElementById('tpl-export-btn').addEventListener('click', () => {
+    const template = collectTemplate();
+    if (!template.name) template.name = 'Robot template';
+    downloadText(`${slug(template.name)}.rf-template.json`, JSON.stringify({
+      type: 'robotframework-file-template',
+      version: 1,
+      template,
+    }, null, 2), 'application/json');
+  });
+
+  document.getElementById('tpl-import-btn').addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result || '{}');
+        const template = payload.template || payload;
+        if (!template || !template.name) throw new Error('Invalid template JSON');
+        applyTemplate(template);
+        showToast(`Imported template "${template.name}"`, 'success');
+      } catch (err) {
+        showToast(err.message || 'Failed to import template', 'error');
+      } finally {
+        importInput.value = '';
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('tpl-generate-btn').addEventListener('click', () => {
+    renderTemplate();
+    showToast('Robot template preview generated', 'success');
+  });
+  document.getElementById('tpl-copy-btn').addEventListener('click', () => {
+    copyToClipboard(renderTemplate(), 'Robot template');
+  });
+  document.getElementById('tpl-download-btn').addEventListener('click', () => {
+    const data = collectTemplate();
+    downloadText(`${slug(data.name || data.suiteName)}.robot`, renderTemplate());
+  });
+
+  Object.values(fields).forEach(el => el.addEventListener('input', renderTemplate));
+  renderTemplateOptions();
+  applyTemplate(builtInTemplates[0]);
+})();
+
+/* ===================================================================
+   5. NAME FORMATTER
 =================================================================== */
 
 (function () {

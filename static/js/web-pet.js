@@ -408,6 +408,7 @@
     el.style.setProperty('--pet-growth', growthState.progress.toFixed(4));
     el.style.setProperty('--pet-frame', frame.toFixed(4));
     el.style.setProperty('--pet-speed', Math.min(1, speed / 7).toFixed(4));
+    el.style.setProperty('--pet-facing', String(facing));
     el.style.transform = `translate3d(${pos.x}px, ${pos.y - bob}px, 0) scaleX(${facing}) rotate(${tilt}deg)`;
     el.dataset.moving = moving ? 'true' : 'false';
   }

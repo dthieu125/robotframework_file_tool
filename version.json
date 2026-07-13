@@ -1,8 +1,17 @@
 {
-  "version": "1.6.0",
+  "version": "1.6.1",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.6.1",
+      "date": "2026-07-14",
+      "changes": [
+        "Removed the duplicate Admin Usage block from Report Merger Settings now that the app has a dedicated Admin Dashboard.",
+        "Fixed Web Pet speech bubbles so text remains readable when the pet turns around.",
+        "Added Robot Template Builder for generating .robot starter files, saving custom templates, and importing/exporting templates as JSON for sharing."
+      ]
+    },
     {
       "version": "1.6.0",
       "date": "2026-07-13",
@@ -112,6 +121,10 @@
     {
       "title": "Test Runner",
       "description": "Run a Robot file from the browser, stream console output, then download or view generated results."
+    },
+    {
+      "title": "Template Builder",
+      "description": "Generate reusable .robot starter files, save custom templates locally, and import or export template JSON for teammates."
     },
     {
       "title": "Name Formatter",
