@@ -38,6 +38,9 @@
     <a class="nav-item" data-panel="formatter" href="#">
       <i class="fa-solid fa-pen-to-square"></i><span>Name Formatter</span>
     </a>
+    <a class="nav-item" data-panel="admin" href="#">
+      <i class="fa-solid fa-gauge-high"></i><span>Admin</span>
+    </a>
   </nav>
   <div class="sidebar-footer">
     <div class="d-flex align-items-center justify-content-between mb-2">
@@ -714,6 +717,56 @@
               </thead>
               <tbody id="fmt-preview-tbody"></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-admin" class="panel">
+    <div class="panel-header">
+      <h2><i class="fa-solid fa-gauge-high me-2"></i>Admin Dashboard</h2>
+      <p class="text-muted">Monitor active browsers, running jobs, and temporary storage for this local app instance.</p>
+    </div>
+
+    <div class="admin-dashboard-grid mb-4">
+      <div class="admin-dashboard-metric">
+        <span id="admin-page-active-clients">0</span>
+        <small>active clients</small>
+      </div>
+      <div class="admin-dashboard-metric">
+        <span id="admin-page-running-jobs">0</span>
+        <small>running jobs</small>
+      </div>
+      <div class="admin-dashboard-metric">
+        <span id="admin-page-storage-total">0 B</span>
+        <small>temp storage</small>
+      </div>
+      <div class="admin-dashboard-metric">
+        <span id="admin-page-storage-items">0</span>
+        <small>stored items</small>
+      </div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <span><i class="fa-solid fa-users me-2"></i>Active Clients</span>
+            <button class="btn btn-sm btn-outline-secondary" id="admin-refresh-btn">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
+          <div class="card-body">
+            <div id="admin-client-table"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-header"><i class="fa-solid fa-list-check me-2"></i>Recent Jobs</div>
+          <div class="card-body">
+            <div id="admin-job-list"></div>
           </div>
         </div>
       </div>

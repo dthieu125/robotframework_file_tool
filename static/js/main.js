@@ -181,6 +181,18 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     localStorage.setItem(CLIENT_ID_KEY, clientId);
   }
 
+  function formatUsageBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  function shortClientId(id) {
+    return String(id || '').slice(0, 8);
+  }
+
   function renderUsage(data) {
     const activeEl = document.getElementById('admin-active-clients');
     const jobsEl = document.getElementById('admin-running-jobs');
@@ -189,6 +201,55 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     if (jobsEl) jobsEl.textContent = data.running_jobs ?? 0;
     if (noteEl) {
       noteEl.textContent = `Clients are counted from browser heartbeats within ${data.ttl_seconds || 45}s.`;
+    }
+
+    const pageActiveEl = document.getElementById('admin-page-active-clients');
+    const pageJobsEl = document.getElementById('admin-page-running-jobs');
+    const pageStorageEl = document.getElementById('admin-page-storage-total');
+    const pageItemsEl = document.getElementById('admin-page-storage-items');
+    const storage = data.storage || {};
+    if (pageActiveEl) pageActiveEl.textContent = data.active_clients ?? 0;
+    if (pageJobsEl) pageJobsEl.textContent = data.running_jobs ?? 0;
+    if (pageStorageEl) pageStorageEl.textContent = formatUsageBytes(storage.total_bytes || 0);
+    if (pageItemsEl) pageItemsEl.textContent = storage.total_items ?? 0;
+
+    const clientTable = document.getElementById('admin-client-table');
+    if (clientTable) {
+      const clients = data.clients || [];
+      clientTable.innerHTML = clients.length ? `
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Client</th><th>IP</th><th>Page</th><th>Seen</th><th>User Agent</th></tr></thead>
+            <tbody>
+              ${clients.map(client => `
+                <tr>
+                  <td><code>${escapeHtml(shortClientId(client.client_id))}</code></td>
+                  <td>${escapeHtml(client.ip || '')}</td>
+                  <td>${escapeHtml(client.page || '')}</td>
+                  <td>${client.last_seen_seconds_ago || 0}s ago</td>
+                  <td><div class="admin-client-user-agent" title="${escapeHtml(client.user_agent || '')}">${escapeHtml(client.user_agent || '')}</div></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>` : '<div class="text-muted small">No active clients yet.</div>';
+    }
+
+    const jobList = document.getElementById('admin-job-list');
+    if (jobList) {
+      const jobs = data.recent_jobs || [];
+      jobList.innerHTML = jobs.length ? jobs.map(job => `
+        <div class="admin-job-row">
+          <div>
+            <div class="fw-semibold"><code>${escapeHtml(shortClientId(job.run_id))}</code></div>
+            <div class="text-muted small">${escapeHtml(job.output_dir || '')}</div>
+          </div>
+          <div class="text-end">
+            <span class="badge ${job.status === 'running' ? 'bg-warning text-dark' : job.status === 'done' ? 'bg-success' : 'bg-secondary'}">${escapeHtml(job.status || 'unknown')}</span>
+            <div class="text-muted small">${job.exit_code === null || job.exit_code === undefined ? '' : `exit ${job.exit_code}`}</div>
+          </div>
+        </div>
+      `).join('') : '<div class="text-muted small">No runner jobs in memory.</div>';
     }
   }
 
@@ -225,6 +286,11 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   const settingsModal = document.getElementById('merger-settings-modal');
   if (settingsModal) {
     settingsModal.addEventListener('show.bs.modal', refreshUsage);
+  }
+
+  const adminRefreshBtn = document.getElementById('admin-refresh-btn');
+  if (adminRefreshBtn) {
+    adminRefreshBtn.addEventListener('click', refreshUsage);
   }
 })();
 

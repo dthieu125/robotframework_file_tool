@@ -152,6 +152,22 @@ def _cleanup_old_files(age_hours=None) -> dict:
     return removed
 
 
+def _dir_usage(path: Path) -> dict:
+    usage = {'bytes': 0, 'items': 0}
+    if not path.exists():
+        return usage
+    for item in path.rglob('*'):
+        try:
+            if item.is_file():
+                usage['bytes'] += item.stat().st_size
+                usage['items'] += 1
+            elif item.is_dir():
+                usage['items'] += 1
+        except Exception:
+            pass
+    return usage
+
+
 def _start_cleanup_worker():
     global cleanup_started
     if cleanup_started:
@@ -271,11 +287,28 @@ def _active_usage_snapshot() -> dict:
         ]
 
     running_jobs = sum(1 for run in run_store.values() if run.get('status') == 'running')
+    recent_jobs = []
+    for run_id, run in list(run_store.items())[-12:]:
+        recent_jobs.append({
+            'run_id': run_id,
+            'status': run.get('status', ''),
+            'exit_code': run.get('exit_code'),
+            'output_dir': Path(str(run.get('output_dir', ''))).name if run.get('output_dir') else '',
+        })
+    uploads_usage = _dir_usage(UPLOAD_DIR)
+    results_usage = _dir_usage(RESULTS_DIR)
     return {
         'active_clients': len(clients),
         'running_jobs': running_jobs,
         'ttl_seconds': ACTIVE_CLIENT_TTL_SECONDS,
         'clients': sorted(clients, key=lambda item: item['last_seen_seconds_ago']),
+        'storage': {
+            'uploads': uploads_usage,
+            'results': results_usage,
+            'total_bytes': uploads_usage['bytes'] + results_usage['bytes'],
+            'total_items': uploads_usage['items'] + results_usage['items'],
+        },
+        'recent_jobs': recent_jobs,
     }
 
 
