@@ -192,10 +192,26 @@
                 </label>
               </div>
             </div>
-            <button class="btn btn-primary w-100" id="merger-btn">
-              <i class="fa-solid fa-code-merge me-2"></i>Merge Reports
-            </button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-primary flex-fill" id="merger-preview-btn">
+                <i class="fa-solid fa-magnifying-glass-chart me-2"></i>Preview Diff
+              </button>
+              <button class="btn btn-primary flex-fill" id="merger-btn">
+                <i class="fa-solid fa-code-merge me-2"></i>Merge Reports
+              </button>
+            </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="merger-preview" class="mt-4" style="display:none">
+      <div class="card">
+        <div class="card-header">
+          <i class="fa-solid fa-magnifying-glass-chart me-2"></i>Merge Preview
+        </div>
+        <div class="card-body">
+          <div id="merger-preview-content"></div>
         </div>
       </div>
     </div>

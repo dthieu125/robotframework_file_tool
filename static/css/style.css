@@ -590,6 +590,35 @@ body {
   overflow-wrap: anywhere;
 }
 
+.preview-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.preview-metric {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: rgba(128,128,128,0.04);
+}
+
+.preview-metric span {
+  display: block;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.preview-metric small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
 /* --- Tables --------------------------------------------------------- */
 .table {
   color: var(--text-primary);

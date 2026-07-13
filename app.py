@@ -576,6 +576,66 @@ def merge_update_candidates():
 # API – File Statistics
 # ---------------------------------------------------------------------------
 
+@app.route('/api/merge/preview', methods=['POST'])
+def merge_preview():
+    from modules.merger import build_merge_preview
+    try:
+        files = request.files.getlist('files')
+        if len(files) < 2:
+            return jsonify({'error': 'At least 2 output.xml files are required'}), 400
+
+        update_mode = request.form.get('update_mode', 'false').lower() == 'true'
+        update_scope = request.form.get('update_scope', 'all')
+        selected_update_tests = None
+        if update_mode and update_scope == 'selected':
+            try:
+                selected_update_tests = json.loads(request.form.get('selected_update_tests', '[]'))
+            except json.JSONDecodeError:
+                selected_update_tests = []
+            if not isinstance(selected_update_tests, list):
+                selected_update_tests = []
+
+        with tempfile.TemporaryDirectory(prefix='rf_merge_preview_') as tmp:
+            tmp_dir = Path(tmp)
+            xml_paths = []
+            file_names = []
+            name_counter: dict[str, int] = {}
+
+            for f in files:
+                if not f.filename:
+                    continue
+                base_name = secure_filename(f.filename) or 'output.xml'
+                stem = Path(base_name).stem
+                ext = Path(base_name).suffix or '.xml'
+                if base_name in name_counter:
+                    idx = name_counter[base_name]
+                    name_counter[base_name] = idx + 1
+                    safe_name = f'{stem}_{idx}{ext}'
+                else:
+                    name_counter[base_name] = 2
+                    safe_name = base_name
+
+                path = tmp_dir / safe_name
+                path.write_bytes(f.read())
+                xml_paths.append(str(path))
+                file_names.append(f.filename)
+
+            if len(xml_paths) < 2:
+                return jsonify({'error': 'At least 2 valid files are required'}), 400
+
+            preview = build_merge_preview(
+                xml_paths,
+                file_names,
+                update_mode=update_mode,
+                selected_update_tests=selected_update_tests,
+            )
+            preview['summary']['metadata_conflicts'] = len(preview.get('metadata_conflicts', []))
+
+        return jsonify(preview)
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
 @app.route('/api/statistics', methods=['POST'])
 def get_statistics():
     from modules.statistics import analyze_robot_file

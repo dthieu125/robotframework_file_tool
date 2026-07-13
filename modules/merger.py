@@ -16,6 +16,7 @@ import sys
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 
 
@@ -200,6 +201,153 @@ def _read_test_occurrences(xml_path: str, file_index: int, file_name: str) -> li
             'file_name': file_name,
         })
     return occurrences
+
+
+def _read_suite_metadata(xml_path: str) -> dict[str, str]:
+    tree = ET.parse(xml_path)
+    suite = _root_suite(tree.getroot())
+    if suite is None:
+        return {}
+
+    metadata: dict[str, str] = {}
+    metadata_nodes = _child_elements(suite, 'metadata')
+    if not metadata_nodes:
+        return metadata
+
+    for item in _child_elements(metadata_nodes[0], 'item'):
+        key = item.get('name', '')
+        if key:
+            metadata[key] = ''.join(item.itertext()).strip()
+    return metadata
+
+
+def _metadata_conflicts_from_xml(xml_paths: list[str], file_names: list[str]) -> list[dict]:
+    metadata_by_file = [_read_suite_metadata(path) for path in xml_paths]
+    keys: list[str] = []
+    for metadata in metadata_by_file:
+        for key in metadata:
+            if key not in keys:
+                keys.append(key)
+
+    conflicts: list[dict] = []
+    for key in sorted(keys):
+        choices: list[dict] = []
+        for idx, metadata in enumerate(metadata_by_file):
+            value = metadata.get(key, '')
+            if not any(choice['value'] == value for choice in choices):
+                choices.append({
+                    'value': value,
+                    'file_index': idx,
+                    'file_name': file_names[idx] if idx < len(file_names) else Path(xml_paths[idx]).name,
+                    'is_default': len(choices) == 0,
+                })
+        if len(choices) > 1:
+            conflicts.append({'key': key, 'choices': choices})
+    return conflicts
+
+
+def build_merge_preview(
+    xml_paths: list[str],
+    file_names: list[str] | None = None,
+    update_mode: bool = False,
+    selected_update_tests: list[str] | None = None,
+) -> dict:
+    """Return a lightweight merge preview without creating output files."""
+    if file_names is None:
+        file_names = [Path(path).name for path in xml_paths]
+
+    occurrences: list[dict] = []
+    per_file: list[dict] = []
+    for idx, path in enumerate(xml_paths):
+        file_name = file_names[idx] if idx < len(file_names) else Path(path).name
+        file_occurrences = _read_test_occurrences(path, idx, file_name)
+        status_counts = Counter((occ.get('status') or 'UNKNOWN') for occ in file_occurrences)
+        per_file.append({
+            'file_index': idx,
+            'file_name': file_name,
+            'tests': len(file_occurrences),
+            'status_counts': dict(sorted(status_counts.items())),
+        })
+        occurrences.extend(file_occurrences)
+
+    by_name: dict[str, list[dict]] = {}
+    for occ in occurrences:
+        by_name.setdefault(occ['name'], []).append(occ)
+
+    repeated = {
+        name: items
+        for name, items in by_name.items()
+        if len({item['file_index'] for item in items}) > 1
+    }
+    status_transitions = []
+    transition_counts = Counter()
+    for name, items in repeated.items():
+        ordered = sorted(items, key=lambda item: item['file_index'])
+        first = ordered[0]
+        last = ordered[-1]
+        before = first.get('status') or 'UNKNOWN'
+        after = last.get('status') or 'UNKNOWN'
+        transition = f'{before}->{after}'
+        transition_counts[transition] += 1
+        if before != after:
+            status_transitions.append({
+                'name': name,
+                'before': before,
+                'after': after,
+                'from_file': first.get('file_name', ''),
+                'to_file': last.get('file_name', ''),
+                'suite': last.get('suite', ''),
+            })
+
+    candidates = list_update_candidates(xml_paths, file_names)
+    selected_names = {name for name in (selected_update_tests or []) if name}
+    if update_mode and selected_update_tests is not None:
+        effective_candidates = [
+            item for item in candidates
+            if item['name'] in selected_names
+        ]
+    else:
+        effective_candidates = candidates
+
+    update_changes = []
+    update_transition_counts = Counter()
+    for item in effective_candidates:
+        earlier = item.get('earlier') or []
+        later = item.get('later') or []
+        previous = sorted(earlier, key=lambda occ: occ['file_index'])[-1] if earlier else {}
+        latest = sorted(later, key=lambda occ: occ['file_index'])[-1] if later else {}
+        before = previous.get('status') or 'UNKNOWN'
+        after = latest.get('status') or 'UNKNOWN'
+        update_transition_counts[f'{before}->{after}'] += 1
+        update_changes.append({
+            'name': item['name'],
+            'before': before,
+            'after': after,
+            'from_file': previous.get('file_name', ''),
+            'to_file': latest.get('file_name', ''),
+            'suite': latest.get('suite') or previous.get('suite', ''),
+            'changed': before != after,
+        })
+
+    return {
+        'success': True,
+        'mode': 'update' if update_mode else 'combine',
+        'files': per_file,
+        'summary': {
+            'file_count': len(xml_paths),
+            'total_tests_seen': len(occurrences),
+            'unique_test_names': len(by_name),
+            'overlapping_test_names': len(repeated),
+            'update_candidates': len(candidates),
+            'effective_update_count': len(effective_candidates),
+            'status_transitions': dict(sorted(transition_counts.items())),
+            'update_transitions': dict(sorted(update_transition_counts.items())),
+            'metadata_conflicts': 0,
+        },
+        'metadata_conflicts': _metadata_conflicts_from_xml(xml_paths, file_names),
+        'status_changes': sorted(status_transitions, key=lambda item: item['name'].lower())[:80],
+        'update_changes': sorted(update_changes, key=lambda item: item['name'].lower())[:120],
+    }
 
 
 def list_update_candidates(xml_paths: list[str], file_names: list[str] | None = None) -> list[dict]:

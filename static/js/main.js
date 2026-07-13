@@ -751,13 +751,146 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     renderFileList();
   }, true);
 
+  function currentMergeMode() {
+    const isUpdateMode = document.querySelector('input[name="merger-mode"]:checked')?.value === 'update';
+    const updateScope = document.querySelector('input[name="merger-update-scope"]:checked')?.value || 'all';
+    return { isUpdateMode, updateScope };
+  }
+
+  function appendCurrentMergeFields(fd, includeOutputOptions = true) {
+    const { isUpdateMode, updateScope } = currentMergeMode();
+    mergerFiles.forEach(f => fd.append('files', f));
+    fd.append('update_mode', isUpdateMode);
+    fd.append('update_scope', updateScope);
+    if (includeOutputOptions) {
+      fd.append('flatten', document.getElementById('merger-flatten').checked);
+      fd.append('output_name', document.getElementById('merger-output-name').value.trim());
+      fd.append('keep_update_history', mergerSettings.updateHistory === 'keep');
+      if (metadataOverridesForNextMerge) {
+        fd.append('metadata_overrides', JSON.stringify(metadataOverridesForNextMerge));
+      }
+      const suiteNameSelect = document.getElementById('merger-suite-name-select');
+      let suiteName = '';
+      if (suiteNameSelect.value === '__custom__') {
+        suiteName = document.getElementById('merger-suite-name-custom').value.trim();
+      } else if (suiteNameSelect.value !== '__auto__') {
+        suiteName = suiteNameSelect.value;
+      }
+      if (suiteName) fd.append('suite_name', suiteName);
+    }
+    if (isUpdateMode && updateScope === 'selected') {
+      fd.append('selected_update_tests', JSON.stringify([...selectedUpdateTests]));
+    }
+    return { isUpdateMode, updateScope };
+  }
+
+  function renderTransitionPills(transitions) {
+    const entries = Object.entries(transitions || {});
+    if (!entries.length) return '<span class="text-muted small">No status transitions found.</span>';
+    return entries.map(([transition, count]) => {
+      const cls = transition === 'FAIL->PASS' ? 'text-bg-success'
+        : transition === 'PASS->FAIL' ? 'text-bg-danger'
+          : 'text-bg-secondary';
+      return `<span class="badge ${cls} me-1 mb-1">${escapeHtml(transition)}: ${count}</span>`;
+    }).join('');
+  }
+
+  function renderPreview(data) {
+    const box = document.getElementById('merger-preview');
+    const content = document.getElementById('merger-preview-content');
+    const summary = data.summary || {};
+    const updateMode = data.mode === 'update';
+    const changes = updateMode ? (data.update_changes || []) : (data.status_changes || []);
+    const transitions = updateMode ? summary.update_transitions : summary.status_transitions;
+    const conflicts = data.metadata_conflicts || [];
+
+    const fileRows = (data.files || []).map(file => `
+      <tr>
+        <td>${file.file_index + 1}</td>
+        <td>${escapeHtml(file.file_name)}</td>
+        <td>${file.tests}</td>
+        <td>${renderTransitionPills(file.status_counts)}</td>
+      </tr>
+    `).join('');
+
+    const changeRows = changes.slice(0, 18).map(item => `
+      <tr>
+        <td>${escapeHtml(item.name)}</td>
+        <td><span class="badge bg-secondary">${escapeHtml(item.before)}</span></td>
+        <td><span class="badge ${item.after === 'PASS' ? 'bg-success' : item.after === 'FAIL' ? 'bg-danger' : 'bg-secondary'}">${escapeHtml(item.after)}</span></td>
+        <td class="text-muted small">${escapeHtml(item.from_file || '')} &rarr; ${escapeHtml(item.to_file || '')}</td>
+      </tr>
+    `).join('');
+
+    const conflictHtml = conflicts.length ? `
+      <div class="alert alert-warning py-2 px-3 mb-3">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+        ${conflicts.length} metadata field(s) differ. Merge will ask you to choose the final value.
+      </div>` : '';
+
+    content.innerHTML = `
+      ${conflictHtml}
+      <div class="preview-metric-grid mb-3">
+        <div class="preview-metric"><span>${summary.file_count || 0}</span><small>files</small></div>
+        <div class="preview-metric"><span>${summary.total_tests_seen || 0}</span><small>tests seen</small></div>
+        <div class="preview-metric"><span>${summary.unique_test_names || 0}</span><small>unique names</small></div>
+        <div class="preview-metric"><span>${summary.overlapping_test_names || 0}</span><small>overlaps</small></div>
+        <div class="preview-metric"><span>${updateMode ? (summary.effective_update_count || 0) : (summary.update_candidates || 0)}</span><small>${updateMode ? 'will update' : 'update candidates'}</small></div>
+      </div>
+      <div class="mb-3">${renderTransitionPills(transitions)}</div>
+      <div class="table-responsive mb-3">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>#</th><th>File</th><th>Tests</th><th>Status count</th></tr></thead>
+          <tbody>${fileRows}</tbody>
+        </table>
+      </div>
+      <div class="fw-semibold mb-2">${updateMode ? 'Tests that will be replaced' : 'Overlapping tests with status changes'}</div>
+      ${changeRows ? `
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Test</th><th>Before</th><th>After</th><th>Source</th></tr></thead>
+            <tbody>${changeRows}</tbody>
+          </table>
+        </div>` : '<div class="text-muted small">No status-changing overlaps found in the selected files.</div>'}
+    `;
+    box.style.display = '';
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('merger-preview-btn').addEventListener('click', async () => {
+    if (mergerFiles.length < 2) {
+      showToast('Please select at least 2 output.xml files', 'warning');
+      return;
+    }
+    const { isUpdateMode, updateScope } = currentMergeMode();
+    if (isUpdateMode && updateScope === 'selected' && updateCandidatesDirty) {
+      showToast('Please load the test case list before previewing selected updates', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('merger-preview-btn');
+    const fd = new FormData();
+    appendCurrentMergeFields(fd, false);
+    setLoading(btn, true, 'Previewing...');
+    try {
+      const res = await fetch('/api/merge/preview', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Preview failed');
+      renderPreview(data);
+      showToast('Merge preview is ready', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
   document.getElementById('merger-btn').addEventListener('click', async () => {
     if (mergerFiles.length < 2) {
       showToast('Please select at least 2 output.xml files', 'warning');
       return;
     }
-    const isUpdateMode = document.querySelector('input[name="merger-mode"]:checked')?.value === 'update';
-    const updateScope = document.querySelector('input[name="merger-update-scope"]:checked')?.value || 'all';
+    const { isUpdateMode, updateScope } = currentMergeMode();
     if (isUpdateMode && updateScope === 'selected') {
       if (updateCandidatesDirty) {
         showToast('Please load the test case list before merging selected updates', 'warning');
@@ -773,27 +906,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     setLoading(btn, true, isUpdateMode ? 'Updating...' : 'Merging...');
 
     const fd = new FormData();
-    mergerFiles.forEach(f => fd.append('files', f));
-    fd.append('flatten', document.getElementById('merger-flatten').checked);
-    fd.append('output_name', document.getElementById('merger-output-name').value.trim());
-    fd.append('update_mode', isUpdateMode);
-    fd.append('update_scope', updateScope);
-    fd.append('keep_update_history', mergerSettings.updateHistory === 'keep');
-    if (metadataOverridesForNextMerge) {
-      fd.append('metadata_overrides', JSON.stringify(metadataOverridesForNextMerge));
-    }
-    if (isUpdateMode && updateScope === 'selected') {
-      fd.append('selected_update_tests', JSON.stringify([...selectedUpdateTests]));
-    }
-
-    const suiteNameSelect = document.getElementById('merger-suite-name-select');
-    let suiteName = '';
-    if (suiteNameSelect.value === '__custom__') {
-      suiteName = document.getElementById('merger-suite-name-custom').value.trim();
-    } else if (suiteNameSelect.value !== '__auto__') {
-      suiteName = suiteNameSelect.value;
-    }
-    if (suiteName) fd.append('suite_name', suiteName);
+    appendCurrentMergeFields(fd, true);
 
     try {
       const res = await fetch('/api/merge', { method: 'POST', body: fd });
