@@ -885,6 +885,86 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     }
   });
 
+  function renderStatusCounts(counts) {
+    return Object.entries(counts || {}).map(([status, count]) => {
+      const cls = status === 'PASS' ? 'bg-success'
+        : status === 'FAIL' ? 'bg-danger'
+          : status === 'SKIP' ? 'bg-warning text-dark'
+            : 'bg-secondary';
+      return `<span class="badge ${cls} me-1">${escapeHtml(status)}: ${count}</span>`;
+    }).join('') || '<span class="text-muted small">No status</span>';
+  }
+
+  function renderFlakyResults(data) {
+    const box = document.getElementById('flaky-results');
+    const content = document.getElementById('flaky-results-content');
+    const summary = data.summary || {};
+    const flaky = data.flaky || [];
+
+    const rows = flaky.slice(0, 40).map(item => {
+      const timeline = (item.files || []).map(file => {
+        const cls = file.status === 'PASS' ? 'text-bg-success'
+          : file.status === 'FAIL' ? 'text-bg-danger'
+            : file.status === 'SKIP' ? 'text-bg-warning'
+              : 'text-bg-secondary';
+        return `<span class="badge ${cls} me-1 mb-1" title="${escapeHtml(file.file_name)}">${escapeHtml(file.status)}</span>`;
+      }).join('');
+      return `
+        <tr>
+          <td>
+            <div class="fw-semibold">${escapeHtml(item.name)}</div>
+            <div class="text-muted small">${escapeHtml((item.suites || [])[0] || '')}</div>
+          </td>
+          <td>${renderStatusCounts(item.status_counts)}</td>
+          <td>${timeline}</td>
+          <td class="text-muted small">${escapeHtml(item.last_file || '')}</td>
+        </tr>`;
+    }).join('');
+
+    content.innerHTML = `
+      <div class="preview-metric-grid mb-3">
+        <div class="preview-metric"><span>${summary.file_count || 0}</span><small>files</small></div>
+        <div class="preview-metric"><span>${summary.unique_test_names || 0}</span><small>unique tests</small></div>
+        <div class="preview-metric"><span>${summary.flaky_tests || 0}</span><small>flaky</small></div>
+        <div class="preview-metric"><span>${summary.stable_tests || 0}</span><small>stable</small></div>
+      </div>
+      ${flaky.length ? `
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Test</th><th>Status counts</th><th>Timeline</th><th>Last seen</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        ${flaky.length > 40 ? `<div class="text-muted small mt-2">Showing first 40 of ${flaky.length} flaky tests.</div>` : ''}
+      ` : '<div class="alert alert-success mb-0"><i class="fa-solid fa-circle-check me-1"></i>No flaky tests detected across the uploaded files.</div>'}
+    `;
+    box.style.display = '';
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('flaky-detect-btn').addEventListener('click', async () => {
+    if (mergerFiles.length < 2) {
+      showToast('Please select at least 2 output.xml files', 'warning');
+      return;
+    }
+    const btn = document.getElementById('flaky-detect-btn');
+    const fd = new FormData();
+    mergerFiles.forEach(f => fd.append('files', f));
+    setLoading(btn, true, 'Detecting...');
+    try {
+      const res = await fetch('/api/flaky/detect', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Flaky detection failed');
+      renderFlakyResults(data);
+      const count = data.summary?.flaky_tests || 0;
+      showToast(count ? `Detected ${count} flaky test(s)` : 'No flaky tests detected', count ? 'warning' : 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  });
+
   document.getElementById('merger-btn').addEventListener('click', async () => {
     if (mergerFiles.length < 2) {
       showToast('Please select at least 2 output.xml files', 'warning');
