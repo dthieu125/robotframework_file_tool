@@ -44,6 +44,18 @@ function copyToClipboard(text, label = 'Content') {
   });
 }
 
+function downloadTextFile(filename, text, mime = 'text/plain') {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function setLoading(btn, loading, text = '') {
   if (loading) {
     btn.dataset.origText = btn.innerHTML;
@@ -1543,6 +1555,41 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     if (!statsData) return;
     copyToClipboard(statsData.test_cases.map(tc => tc.name).join('\n'), 'Test case names');
   });
+
+  function csvCell(value) {
+    return `"${String(value ?? '').replace(/"/g, '""')}"`;
+  }
+
+  function statsExportBaseName() {
+    const selected = statsFile?.name || 'robot_test_cases';
+    return selected.replace(/\.[^.]+$/, '') || 'robot_test_cases';
+  }
+
+  document.getElementById('tc-export-txt').addEventListener('click', () => {
+    if (!statsData) return;
+    const names = statsData.test_cases.map(tc => tc.name).join('\n') + '\n';
+    downloadTextFile(`${statsExportBaseName()}_test_cases.txt`, names);
+    showToast(`Exported ${statsData.test_cases.length} test case name(s)`, 'success');
+  });
+
+  document.getElementById('tc-export-csv').addEventListener('click', () => {
+    if (!statsData) return;
+    const header = ['#', 'Test Case Name', 'Tags', 'Steps', 'Line', 'Template'];
+    const rows = statsData.test_cases.map((tc, index) => [
+      index + 1,
+      tc.name,
+      (tc.tags || []).join(' | '),
+      tc.step_count,
+      tc.lineno,
+      tc.template || '',
+    ]);
+    const csv = [header, ...rows]
+      .map(row => row.map(csvCell).join(','))
+      .join('\n') + '\n';
+    downloadTextFile(`${statsExportBaseName()}_test_cases.csv`, csv, 'text/csv');
+    showToast(`Exported ${statsData.test_cases.length} test case row(s)`, 'success');
+  });
+
   document.getElementById('kw-copy-all').addEventListener('click', () => {
     if (!statsData) return;
     copyToClipboard(statsData.keywords.map(kw => kw.name).join('\n'), 'Keyword names');

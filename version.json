@@ -1,8 +1,15 @@
 {
-  "version": "1.6.2",
+  "version": "1.6.3",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.6.3",
+      "date": "2026-07-14",
+      "changes": [
+        "Added Test Case export actions to Statistics after analysis, with TXT export for names and CSV export with tags, steps, line numbers, and template information."
+      ]
+    },
     {
       "version": "1.6.2",
       "date": "2026-07-14",
@@ -124,7 +131,7 @@
     },
     {
       "title": "Statistics",
-      "description": "Upload or paste a .robot/.resource file to inspect test cases, keywords, variables, settings, and source lines."
+      "description": "Upload or paste a .robot/.resource file to inspect test cases, keywords, variables, settings, source lines, and export the test case list."
     },
     {
       "title": "Test Runner",
