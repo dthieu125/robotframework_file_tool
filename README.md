@@ -75,7 +75,7 @@ Upload limit is 200 MB. Runtime files are stored in `uploads/` and `results/`; b
 | Report Merger | Upload at least two Robot Framework `output.xml` files, preview differences, deduplicate identical files, merge results, and generate XML/log/report output. |
 | Flaky Test Detector | Compare uploaded `output.xml` files and list tests whose status changes across runs. |
 | File Statistics | Analyze Robot files and list test cases, keywords, settings, variables, line numbers, and source content. |
-| Test Runner | Upload and run a `.robot` file, stream console output in real time, and download generated results. |
+| Test Runner | Upload and run a `.robot` file or paste Robot Framework code directly, stream console output in real time, and download generated results. |
 | Template Builder | Generate starter `.robot` files, save custom templates locally, and import/export template JSON to share with teammates. |
 | Name Formatter | Preview and apply bulk test case rename rules such as regex replacement, prefix/suffix, templates, and numbering. |
 | Web Pet | A lightweight animated pet mascot that wanders around the app, grows over time, reacts to the mouse cursor, and can be disabled or pinned to a chosen pet type from Settings. |

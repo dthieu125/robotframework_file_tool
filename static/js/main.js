@@ -1566,6 +1566,7 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   let configFile = null;
   let currentRunId = null;
   let evtSource = null;
+  let runnerInputMode = 'file';
 
   const runnerDropzone = document.getElementById('runner-dropzone');
   const runnerInput = document.getElementById('runner-file-input');
@@ -1573,6 +1574,23 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     robotFile = files[0];
     document.getElementById('runner-selected-file').textContent =
       `Selected: ${robotFile.name} (${(robotFile.size / 1024).toFixed(1)} KB)`;
+  });
+
+  function setRunnerInputMode(mode) {
+    runnerInputMode = mode;
+    document.getElementById('runner-input-file').style.display = mode === 'file' ? '' : 'none';
+    document.getElementById('runner-input-paste').style.display = mode === 'paste' ? '' : 'none';
+    document.getElementById('runner-tab-file').classList.toggle('active', mode === 'file');
+    document.getElementById('runner-tab-paste').classList.toggle('active', mode === 'paste');
+  }
+
+  document.getElementById('runner-tab-file').addEventListener('click', e => {
+    e.preventDefault();
+    setRunnerInputMode('file');
+  });
+  document.getElementById('runner-tab-paste').addEventListener('click', e => {
+    e.preventDefault();
+    setRunnerInputMode('paste');
   });
 
   const configDropzone = document.getElementById('runner-config-dropzone');
@@ -1584,7 +1602,15 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
   });
 
   document.getElementById('runner-start-btn').addEventListener('click', async () => {
-    if (!robotFile) { showToast('Please select a .robot file', 'warning'); return; }
+    const pasteContent = document.getElementById('runner-paste-content').value.trim();
+    if (runnerInputMode === 'file' && !robotFile) {
+      showToast('Please select a .robot file or switch to Paste mode', 'warning');
+      return;
+    }
+    if (runnerInputMode === 'paste' && !pasteContent) {
+      showToast('Please paste Robot Framework code before running', 'warning');
+      return;
+    }
 
     const terminal = document.getElementById('runner-terminal');
     terminal.innerHTML = '';
@@ -1600,7 +1626,12 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     setLoading(btn, true, 'Running...');
 
     const fd = new FormData();
-    fd.append('robot_file', robotFile);
+    if (runnerInputMode === 'paste') {
+      fd.append('robot_content', pasteContent);
+      fd.append('robot_filename', document.getElementById('runner-paste-filename').value.trim() || 'pasted_test.robot');
+    } else {
+      fd.append('robot_file', robotFile);
+    }
     if (configFile) fd.append('config_file', configFile);
     fd.append('include_tags', document.getElementById('runner-include-tags').value);
     fd.append('exclude_tags', document.getElementById('runner-exclude-tags').value);

@@ -746,10 +746,12 @@ def get_statistics():
 @app.route('/api/run', methods=['POST'])
 def start_run():
     try:
-        if 'robot_file' not in request.files:
-            return jsonify({'error': 'Missing robot file'}), 400
+        robot_file = request.files.get('robot_file')
+        robot_content = request.form.get('robot_content', '')
+        robot_filename = request.form.get('robot_filename', '').strip() or 'pasted_test.robot'
+        if not robot_file and not robot_content.strip():
+            return jsonify({'error': 'Missing robot file or pasted robot content'}), 400
 
-        robot_file = request.files['robot_file']
         config_file = request.files.get('config_file')
 
         include_tags = request.form.get('include_tags', '')
@@ -762,9 +764,20 @@ def start_run():
         output_dir = RESULTS_DIR / run_id
         output_dir.mkdir(parents=True)
 
-        robot_fn = secure_filename(robot_file.filename or 'test.robot')
+        if robot_file:
+            robot_fn = secure_filename(robot_file.filename or 'test.robot')
+        else:
+            robot_fn = secure_filename(robot_filename) or 'pasted_test.robot'
+            if not robot_fn.lower().endswith(('.robot', '.resource', '.txt')):
+                robot_fn += '.robot'
         robot_path = work_dir / robot_fn
-        robot_file.save(str(robot_path))
+        if robot_file:
+            robot_file.save(str(robot_path))
+        else:
+            robot_path.write_text(
+                robot_content.replace('\r\n', '\n').replace('\r', '\n'),
+                encoding='utf-8',
+            )
 
         config_path = None
         if config_file and config_file.filename:

@@ -1,8 +1,16 @@
 {
-  "version": "1.6.1",
+  "version": "1.6.2",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.6.2",
+      "date": "2026-07-14",
+      "changes": [
+        "Added Paste mode to Test Runner so Robot Framework code can be pasted and executed directly without creating a file first.",
+        "Kept the existing Test Runner upload flow compatible while allowing pasted code to use an optional generated file name."
+      ]
+    },
     {
       "version": "1.6.1",
       "date": "2026-07-14",
@@ -120,7 +128,7 @@
     },
     {
       "title": "Test Runner",
-      "description": "Run a Robot file from the browser, stream console output, then download or view generated results."
+      "description": "Run an uploaded Robot file or paste Robot Framework code directly, stream console output, then download or view generated results."
     },
     {
       "title": "Template Builder",

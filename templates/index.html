@@ -456,14 +456,29 @@
       <!-- Files -->
       <div class="col-lg-5">
         <div class="card mb-3">
-          <div class="card-header"><i class="fa-solid fa-file-code me-2"></i>Robot File</div>
-          <div class="card-body">
-            <div class="dropzone dropzone-sm" id="runner-dropzone">
-              <i class="fa-solid fa-robot me-2"></i>
-              <span>Drag &amp; drop or click to select a .robot file</span>
-              <input type="file" id="runner-file-input" accept=".robot,.resource,.txt" style="display:none" />
+          <div class="card-header">
+            <i class="fa-solid fa-file-code me-2"></i>Robot Source
+            <div class="ms-auto d-inline-flex gap-2 float-end">
+              <button class="btn btn-xs btn-outline-secondary active" id="runner-tab-file">File</button>
+              <button class="btn btn-xs btn-outline-secondary" id="runner-tab-paste">Paste</button>
             </div>
-            <div id="runner-selected-file" class="mt-2 text-muted small"></div>
+          </div>
+          <div class="card-body">
+            <div id="runner-input-file">
+              <div class="dropzone dropzone-sm" id="runner-dropzone">
+                <i class="fa-solid fa-robot me-2"></i>
+                <span>Drag &amp; drop or click to select a .robot file</span>
+                <input type="file" id="runner-file-input" accept=".robot,.resource,.txt" style="display:none" />
+              </div>
+              <div id="runner-selected-file" class="mt-2 text-muted small"></div>
+            </div>
+            <div id="runner-input-paste" style="display:none">
+              <label class="form-label">Pasted file name</label>
+              <input type="text" class="form-control mb-2" id="runner-paste-filename" value="pasted_test.robot" />
+              <label class="form-label">Robot code</label>
+              <textarea class="form-control font-mono" id="runner-paste-content" rows="12"
+                placeholder="*** Settings ***&#10;Library    BuiltIn&#10;&#10;*** Test Cases ***&#10;Quick Keyword Test&#10;    Log    Hello from pasted robot code&#10;    Should Be True    ${TRUE}"></textarea>
+            </div>
           </div>
         </div>
         <div class="card mb-3">
