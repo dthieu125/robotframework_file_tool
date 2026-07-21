@@ -435,6 +435,17 @@ def merge_reports():
             ]
             if not selected_update_tests:
                 return jsonify({'error': 'Please select at least one test case to update'}), 400
+
+        excluded_tests = None
+        if request.form.get('excluded_tests'):
+            try:
+                excluded_tests = json.loads(request.form.get('excluded_tests', '[]'))
+            except json.JSONDecodeError:
+                excluded_tests = []
+            if not isinstance(excluded_tests, list):
+                excluded_tests = []
+            excluded_tests = [str(name).strip() for name in excluded_tests if str(name).strip()]
+
         raw_output_name = request.form.get('output_name', '').strip()
         output_name = secure_filename(raw_output_name) if raw_output_name else None
         suite_name = request.form.get('suite_name', '').strip() or None
@@ -517,6 +528,7 @@ def merge_reports():
             suite_name,
             keep_update_history,
             selected_update_tests,
+            excluded_tests,
             metadata_overrides,
             [entry[0] for entry in unique_entries],
         )
@@ -537,6 +549,7 @@ def merge_reports():
             'selective_update_count': result.get('selective_update_count', 0),
             'keep_update_history': keep_update_history,
             'stripped_history_count': result.get('stripped_history_count', 0),
+            'removed_count': result.get('removed_count', 0),
         }
         if skipped_duplicates:
             resp['skipped_duplicates'] = skipped_duplicates
@@ -628,6 +641,16 @@ def merge_preview():
             if not isinstance(selected_update_tests, list):
                 selected_update_tests = []
 
+        excluded_tests = None
+        if request.form.get('excluded_tests'):
+            try:
+                excluded_tests = json.loads(request.form.get('excluded_tests', '[]'))
+            except json.JSONDecodeError:
+                excluded_tests = []
+            if not isinstance(excluded_tests, list):
+                excluded_tests = []
+            excluded_tests = [str(name).strip() for name in excluded_tests if str(name).strip()]
+
         with tempfile.TemporaryDirectory(prefix='rf_merge_preview_') as tmp:
             tmp_dir = Path(tmp)
             xml_paths = []
@@ -661,11 +684,194 @@ def merge_preview():
                 file_names,
                 update_mode=update_mode,
                 selected_update_tests=selected_update_tests,
+                excluded_tests=excluded_tests,
             )
             preview['summary']['metadata_conflicts'] = len(preview.get('metadata_conflicts', []))
 
         return jsonify(preview)
     except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/result-editor/tests', methods=['POST'])
+def result_editor_tests():
+    from modules.merger import list_remove_candidates
+    try:
+        files = request.files.getlist('files')
+        if len(files) < 1:
+            return jsonify({'error': 'Please upload one output.xml file.'}), 400
+
+        with tempfile.TemporaryDirectory(prefix='rf_result_editor_') as tmp:
+            tmp_dir = Path(tmp)
+            xml_paths = []
+            file_names = []
+            name_counter: dict[str, int] = {}
+
+            for f in files:
+                if not f.filename:
+                    continue
+                base_name = secure_filename(f.filename) or 'output.xml'
+                stem = Path(base_name).stem
+                ext = Path(base_name).suffix or '.xml'
+                if base_name in name_counter:
+                    idx = name_counter[base_name]
+                    name_counter[base_name] = idx + 1
+                    safe_name = f'{stem}_{idx}{ext}'
+                else:
+                    name_counter[base_name] = 2
+                    safe_name = base_name
+
+                path = tmp_dir / safe_name
+                path.write_bytes(f.read())
+                xml_paths.append(str(path))
+                file_names.append(f.filename)
+
+            if len(xml_paths) != 1:
+                return jsonify({'error': 'Exactly one output.xml file is required.'}), 400
+
+            candidates = list_remove_candidates(xml_paths, file_names)
+
+        return jsonify({
+            'success': True,
+            'candidates': candidates,
+            'count': len(candidates),
+        })
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/result-editor/preview', methods=['POST'])
+def result_editor_preview():
+    from modules.merger import list_remove_candidates
+    try:
+        files = request.files.getlist('files')
+        if len(files) < 1:
+            return jsonify({'error': 'Please upload one output.xml file.'}), 400
+
+        removed_tests = None
+        if request.form.get('removed_tests'):
+            try:
+                removed_tests = json.loads(request.form.get('removed_tests', '[]'))
+            except json.JSONDecodeError:
+                removed_tests = []
+            if not isinstance(removed_tests, list):
+                removed_tests = []
+            removed_tests = [str(name).strip() for name in removed_tests if str(name).strip()]
+
+        with tempfile.TemporaryDirectory(prefix='rf_result_editor_preview_') as tmp:
+            tmp_dir = Path(tmp)
+            xml_path = None
+            file_name = None
+            for f in files:
+                if not f.filename:
+                    continue
+                base_name = secure_filename(f.filename) or 'output.xml'
+                path = tmp_dir / base_name
+                path.write_bytes(f.read())
+                xml_path = str(path)
+                file_name = f.filename
+
+            if xml_path is None:
+                return jsonify({'error': 'No valid output.xml file uploaded.'}), 400
+
+            candidates = list_remove_candidates([xml_path], [file_name])
+            selected_names = {name for name in (removed_tests or []) if name}
+            removed = [item for item in candidates if item['full_name'] in selected_names or item['name'] in selected_names]
+
+            return jsonify({
+                'success': True,
+                'file_name': file_name,
+                'total_tests': len(candidates),
+                'removed_count': len(removed),
+                'remaining_tests': max(0, len(candidates) - len(removed)),
+                'removed_tests': removed[:150],
+            })
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+
+@app.route('/api/result-editor/apply', methods=['POST'])
+def result_editor_apply():
+    from modules.merger import merge_xml_reports
+    try:
+        files = request.files.getlist('files')
+        if len(files) < 1:
+            return jsonify({'error': 'Please upload one output.xml file.'}), 400
+
+        removed_tests = None
+        if request.form.get('removed_tests'):
+            try:
+                removed_tests = json.loads(request.form.get('removed_tests', '[]'))
+            except json.JSONDecodeError:
+                removed_tests = []
+            if not isinstance(removed_tests, list):
+                removed_tests = []
+            removed_tests = [str(name).strip() for name in removed_tests if str(name).strip()]
+        if not removed_tests:
+            return jsonify({'error': 'Please select at least one test case to remove.'}), 400
+
+        flatten = request.form.get('flatten', 'false').lower() == 'true'
+        raw_output_name = request.form.get('output_name', '').strip()
+        output_name = secure_filename(raw_output_name) if raw_output_name else None
+
+        run_id = str(uuid.uuid4())
+        work_dir = UPLOAD_DIR / run_id
+        work_dir.mkdir(parents=True)
+
+        with tempfile.TemporaryDirectory(prefix='rf_result_editor_') as tmp:
+            tmp_dir = Path(tmp)
+            xml_path = None
+            file_name = None
+            for f in files:
+                if not f.filename:
+                    continue
+                base_name = secure_filename(f.filename) or 'output.xml'
+                path = tmp_dir / base_name
+                path.write_bytes(f.read())
+                xml_path = str(path)
+                file_name = f.filename
+
+            if xml_path is None:
+                _cleanup_dir(work_dir)
+                return jsonify({'error': 'No valid output.xml file uploaded.'}), 400
+
+            result_dir = RESULTS_DIR / run_id
+            result_dir.mkdir(parents=True)
+
+            result = merge_xml_reports(
+                [xml_path],
+                result_dir,
+                output_name,
+                flatten,
+                False,
+                None,
+                True,
+                None,
+                removed_tests,
+                None,
+                [file_name],
+            )
+
+        zip_path = RESULTS_DIR / f'{run_id}.zip'
+        _zip_dir(result_dir, zip_path)
+        _cleanup_dir(work_dir)
+
+        resp = {
+            'success': True,
+            'run_id': run_id,
+            'files': [Path(fp).name for fp in result['files']],
+            'download_url': f'/api/download/{run_id}',
+            'report_url': f'/api/merge/{run_id}/report',
+            'log_url': f'/api/merge/{run_id}/log',
+            'removed_count': result.get('removed_count', 0),
+        }
+        return jsonify(resp)
+    except Exception as exc:
+        try:
+            if 'work_dir' in locals():
+                _cleanup_dir(work_dir)
+        except Exception:
+            pass
         return jsonify({'error': str(exc)}), 500
 
 

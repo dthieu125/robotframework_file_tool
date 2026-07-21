@@ -1122,6 +1122,13 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
             <strong>Update mode:</strong> ${scopeText} ${historyText}
           </div>`;
       }
+      if (data.removed_count) {
+        filesHtml += `
+          <div class="alert alert-warning mt-2 mb-0 py-2 px-3" style="font-size:13px">
+            <i class="fa-solid fa-trash-can me-1"></i>
+            Removed ${data.removed_count} excluded test result(s) from the merged report.
+          </div>`;
+      }
 
       if (data.skipped_duplicates && data.skipped_duplicates.length > 0) {
         filesHtml += `
@@ -1188,6 +1195,397 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
     const wrap = document.getElementById('merger-report-frame-wrap');
     wrap.style.display = 'none';
     document.getElementById('merger-report-frame').src = '';
+  });
+})();
+
+/* ===================================================================
+   2. RESULT EDITOR
+=================================================================== */
+
+(function () {
+  const dropzone = document.getElementById('editor-dropzone');
+  const fileInput = document.getElementById('editor-file-input');
+  let editorFile = null;
+  let editorCandidates = [];
+  let selectedRemovals = new Set();
+  let editorCandidatesDirty = true;
+  const editorFileMeta = new WeakMap();
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  function formatFileDate(ms) {
+    if (!ms) return '—';
+    const d = new Date(ms);
+    const date = d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+    const time = String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0');
+    return date + ' ' + time;
+  }
+
+  async function extractEditorFileMeta(file) {
+    const HEAD_BYTES = 32 * 1024;
+    const blob = file.size > HEAD_BYTES ? file.slice(0, HEAD_BYTES) : file;
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const text = e.target.result || '';
+        try {
+          const doc = new DOMParser().parseFromString(text, 'text/xml');
+          const suite = doc.querySelector('suite');
+          if (suite) {
+            resolve({
+              sourcePath: suite.getAttribute('source') || '',
+            });
+            return;
+          }
+        } catch {}
+        const tag = text.match(/<suite\b[^>]*>/);
+        if (tag) {
+          const srcMatch = tag[0].match(/\bsource="([^"]*)"/);
+          resolve({ sourcePath: srcMatch ? srcMatch[1] : '' });
+          return;
+        }
+        resolve({ sourcePath: '' });
+      };
+      reader.onerror = () => resolve({ sourcePath: '' });
+      reader.readAsText(blob);
+    });
+  }
+
+  async function getEditorFileMeta(file) {
+    let meta = editorFileMeta.get(file);
+    if (!meta) {
+      meta = await extractEditorFileMeta(file);
+      editorFileMeta.set(file, meta);
+    }
+    return meta;
+  }
+
+  function updateEditorSelectedCount() {
+    document.getElementById('editor-removed-count').textContent = `${selectedRemovals.size} selected`;
+  }
+
+  function updateEditorActions() {
+    const removeButtons = document.querySelectorAll('.editor-file-remove-btn');
+    removeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        editorFile = null;
+        editorCandidates = [];
+        selectedRemovals.clear();
+        editorCandidatesDirty = true;
+        document.getElementById('editor-preview').style.display = 'none';
+        document.getElementById('editor-results').style.display = 'none';
+        renderEditorFileList();
+        renderEditorRemovalCandidates();
+      });
+    });
+
+    const clearFileBtn = document.getElementById('editor-clear-file-btn');
+    if (clearFileBtn) {
+      clearFileBtn.addEventListener('click', () => {
+        editorFile = null;
+        editorCandidates = [];
+        selectedRemovals.clear();
+        editorCandidatesDirty = true;
+        document.getElementById('editor-preview').style.display = 'none';
+        document.getElementById('editor-results').style.display = 'none';
+        renderEditorFileList();
+        renderEditorRemovalCandidates();
+      });
+    }
+  }
+
+  async function renderEditorFileList() {
+    const container = document.getElementById('editor-file-list');
+    const clearBtn = document.getElementById('editor-clear-file-btn');
+    if (!container) return;
+    if (!editorFile) {
+      if (clearBtn) clearBtn.style.display = 'none';
+      container.innerHTML = '<div class="text-muted small">No file imported yet.</div>';
+      return;
+    }
+
+    if (clearBtn) clearBtn.style.display = '';
+    const sourcePath = 'Loading source…';
+
+    container.innerHTML = `
+      <div class="editor-file-summary border rounded p-3">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div>
+            <div class="fw-semibold">${escapeHtml(editorFile.name)}</div>
+            <div class="text-muted small editor-file-source">${escapeHtml(sourcePath)}</div>
+          </div>
+          <div class="text-end text-muted small">
+            <div>${escapeHtml(formatBytes(editorFile.size))}</div>
+            <div>${escapeHtml(formatFileDate(editorFile.lastModified))}</div>
+          </div>
+        </div>
+      </div>`;
+
+    getEditorFileMeta(editorFile).then(meta => {
+      if (!editorFile) return;
+      const sourceEl = document.getElementById('editor-file-list')?.querySelector('.editor-file-source');
+      if (sourceEl) {
+        sourceEl.textContent = meta?.sourcePath || '—';
+      }
+    }).catch(() => {
+      const sourceEl = document.getElementById('editor-file-list')?.querySelector('.editor-file-source');
+      if (sourceEl) sourceEl.textContent = '—';
+    });
+  }
+
+  function renderEditorRemovalCandidates() {
+    const container = document.getElementById('editor-remove-candidate-list');
+    const selectAllBtn = document.getElementById('editor-select-all-removals');
+    const clearBtn = document.getElementById('editor-clear-removals');
+    const searchEl = document.getElementById('editor-remove-search');
+    const search = (searchEl?.value || '').trim().toLowerCase();
+
+    if (!container) return;
+    if (editorCandidatesDirty) {
+      container.innerHTML = '<div class="text-muted small">Load the file to list test cases for removal.</div>';
+      selectAllBtn.style.display = 'none';
+      clearBtn.style.display = 'none';
+      updateEditorSelectedCount();
+      return;
+    }
+
+    if (!editorCandidates.length) {
+      container.innerHTML = '<div class="text-muted small">No test cases were found in the uploaded file.</div>';
+      selectAllBtn.style.display = 'none';
+      clearBtn.style.display = 'none';
+      updateEditorSelectedCount();
+      return;
+    }
+
+    const visible = editorCandidates.filter(item => {
+      if (!search) return true;
+      const haystack = [item.full_name, item.name, item.suite, item.last_file].join(' ').toLowerCase();
+      return haystack.includes(search);
+    });
+
+    selectAllBtn.style.display = visible.length ? '' : 'none';
+    clearBtn.style.display = visible.length ? '' : 'none';
+
+    if (!visible.length) {
+      container.innerHTML = '<div class="text-muted small">No matching test cases.</div>';
+      updateEditorSelectedCount();
+      return;
+    }
+
+    container.innerHTML = visible.map(item => {
+      const checked = selectedRemovals.has(item.full_name) ? 'checked' : '';
+      return `
+        <label class="update-candidate-row">
+          <input class="form-check-input editor-removal-candidate-check" type="checkbox" value="${escapeHtml(item.full_name)}" ${checked} />
+          <span class="update-candidate-main">
+            <span class="update-candidate-name">${escapeHtml(item.full_name)}</span>
+            <span class="update-candidate-meta">${escapeHtml(item.last_file)} · ${escapeHtml(item.last_status)}</span>
+          </span>
+        </label>`;
+    }).join('');
+
+    container.querySelectorAll('.editor-removal-candidate-check').forEach(chk => {
+      chk.addEventListener('change', () => {
+        if (chk.checked) selectedRemovals.add(chk.value);
+        else selectedRemovals.delete(chk.value);
+        updateEditorSelectedCount();
+      });
+    });
+    updateEditorSelectedCount();
+  }
+
+  async function loadEditorCandidates() {
+    if (!editorFile) {
+      showToast('Please upload an output.xml file first', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('editor-load-tests-btn');
+    const fd = new FormData();
+    fd.append('files', editorFile);
+    setLoading(btn, true, 'Loading...');
+    try {
+      const res = await fetch('/api/result-editor/tests', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to load test cases');
+      editorCandidates = data.candidates || [];
+      selectedRemovals = new Set(editorCandidates.map(item => item.full_name));
+      editorCandidatesDirty = false;
+      renderEditorRemovalCandidates();
+      showToast(`Loaded ${editorCandidates.length} test case(s)`, editorCandidates.length ? 'success' : 'info');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  async function previewEditorChanges() {
+    if (!editorFile) {
+      showToast('Please upload an output.xml file first', 'warning');
+      return;
+    }
+    if (selectedRemovals.size === 0) {
+      showToast('Please select at least one test case to remove', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('editor-preview-btn');
+    const fd = new FormData();
+    fd.append('files', editorFile);
+    fd.append('removed_tests', JSON.stringify([...selectedRemovals]));
+    setLoading(btn, true, 'Previewing...');
+
+    try {
+      const res = await fetch('/api/result-editor/preview', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Preview failed');
+
+      const content = document.getElementById('editor-preview-content');
+      content.innerHTML = `
+        <div class="preview-metric-grid mb-3">
+          <div class="preview-metric"><span>${data.total_tests || 0}</span><small>tests loaded</small></div>
+          <div class="preview-metric"><span>${data.removed_count || 0}</span><small>tests removed</small></div>
+          <div class="preview-metric"><span>${data.remaining_tests || 0}</span><small>tests remaining</small></div>
+        </div>
+        <div class="alert alert-info mb-0">
+          <i class="fa-solid fa-info-circle me-1"></i>
+          ${escapeHtml(data.removed_count || 0)} test case(s) will be removed from the regenerated report.
+        </div>`;
+      document.getElementById('editor-preview').style.display = '';
+      content.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showToast('Result preview ready', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  async function applyEditorChanges() {
+    if (!editorFile) {
+      showToast('Please upload an output.xml file first', 'warning');
+      return;
+    }
+    if (selectedRemovals.size === 0) {
+      showToast('Please select at least one test case to remove', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('editor-apply-btn');
+    const fd = new FormData();
+    fd.append('files', editorFile);
+    fd.append('removed_tests', JSON.stringify([...selectedRemovals]));
+
+    setLoading(btn, true, 'Applying...');
+    try {
+      const res = await fetch('/api/result-editor/apply', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Apply failed');
+
+      document.getElementById('editor-results').style.display = 'block';
+      document.getElementById('editor-download-all').href = data.download_url;
+      document.getElementById('editor-result-files').innerHTML = data.files.map(f => `
+        <div class="file-chip mb-1"><i class="fa-solid fa-file-code"></i> ${escapeHtml(f)}</div>`).join('');
+      const reportBtn = document.getElementById('editor-view-report-btn');
+      const logBtn = document.getElementById('editor-view-log-btn');
+      if (data.report_url) {
+        reportBtn.style.display = '';
+        reportBtn.dataset.url = data.report_url;
+      }
+      if (data.log_url) {
+        logBtn.style.display = '';
+        logBtn.dataset.url = data.log_url;
+      }
+      showToast(`Removed ${data.removed_count || 0} test(s) and regenerated report.`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setLoading(btn, false);
+    }
+  }
+
+  setupDropzone(dropzone, fileInput, files => {
+    const xmlFile = files[0];
+    if (!xmlFile.name.toLowerCase().endsWith('.xml')) {
+      showToast('Only .xml files are accepted', 'warning');
+      return;
+    }
+    editorFile = xmlFile;
+    editorCandidates = [];
+    selectedRemovals.clear();
+    editorCandidatesDirty = true;
+    document.getElementById('editor-preview').style.display = 'none';
+    document.getElementById('editor-results').style.display = 'none';
+    renderEditorFileList();
+    renderEditorRemovalCandidates();
+    getEditorFileMeta(editorFile).then(renderEditorFileList);
+  }, false);
+
+  document.getElementById('editor-clear-file-btn').addEventListener('click', e => {
+    e.preventDefault();
+    editorFile = null;
+    editorCandidates = [];
+    selectedRemovals.clear();
+    editorCandidatesDirty = true;
+    document.getElementById('editor-preview').style.display = 'none';
+    document.getElementById('editor-results').style.display = 'none';
+    renderEditorFileList();
+    renderEditorRemovalCandidates();
+  });
+
+  document.getElementById('editor-load-tests-btn').addEventListener('click', async e => {
+    e.preventDefault();
+    await loadEditorCandidates();
+  });
+
+  document.getElementById('editor-remove-search').addEventListener('input', renderEditorRemovalCandidates);
+  document.getElementById('editor-select-all-removals').addEventListener('click', e => {
+    e.preventDefault();
+    editorCandidates.forEach(item => selectedRemovals.add(item.full_name));
+    renderEditorRemovalCandidates();
+  });
+  document.getElementById('editor-clear-removals').addEventListener('click', e => {
+    e.preventDefault();
+    selectedRemovals.clear();
+    renderEditorRemovalCandidates();
+  });
+
+  document.getElementById('editor-preview-btn').addEventListener('click', async () => {
+    await previewEditorChanges();
+  });
+
+  document.getElementById('editor-apply-btn').addEventListener('click', async () => {
+    await applyEditorChanges();
+  });
+
+  document.getElementById('editor-view-report-btn').addEventListener('click', function () {
+    const url = this.dataset.url;
+    if (!url) return;
+    const wrap = document.getElementById('editor-report-frame-wrap');
+    document.getElementById('editor-report-frame').src = url;
+    wrap.style.display = '';
+    wrap.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  document.getElementById('editor-view-log-btn').addEventListener('click', function () {
+    const url = this.dataset.url;
+    if (!url) return;
+    window.open(url, '_blank');
+  });
+
+  document.getElementById('editor-report-close').addEventListener('click', () => {
+    const wrap = document.getElementById('editor-report-frame-wrap');
+    wrap.style.display = 'none';
+    document.getElementById('editor-report-frame').src = '';
   });
 })();
 

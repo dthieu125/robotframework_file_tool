@@ -590,27 +590,23 @@ body {
   overflow-wrap: anywhere;
 }
 
-.preview-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-}
-
-.preview-metric {
+/* --- Result Editor file summary ------------------------------------ */
+.editor-file-summary {
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  background: rgba(128,128,128,0.04);
-}
-
-.preview-metric span {
-  display: block;
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--bg-input);
   color: var(--text-primary);
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
 }
 
+.editor-file-summary .editor-file-source,
+.editor-file-summary .text-muted {
+  color: var(--text-muted);
+}
+
+.editor-file-summary .text-end {
+  color: var(--text-secondary);
+}
 .preview-metric small {
   display: block;
   margin-top: 5px;

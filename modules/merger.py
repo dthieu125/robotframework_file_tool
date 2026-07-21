@@ -251,16 +251,27 @@ def build_merge_preview(
     file_names: list[str] | None = None,
     update_mode: bool = False,
     selected_update_tests: list[str] | None = None,
+    excluded_tests: list[str] | None = None,
 ) -> dict:
     """Return a lightweight merge preview without creating output files."""
     if file_names is None:
         file_names = [Path(path).name for path in xml_paths]
 
+    excluded_names = {name for name in (excluded_tests or []) if name}
     occurrences: list[dict] = []
     per_file: list[dict] = []
+    excluded_names = {name for name in (excluded_tests or []) if name}
     for idx, path in enumerate(xml_paths):
         file_name = file_names[idx] if idx < len(file_names) else Path(path).name
-        file_occurrences = _read_test_occurrences(path, idx, file_name)
+        file_occurrences = [
+            occ for occ in _read_test_occurrences(path, idx, file_name)
+            if not (
+                excluded_names and (
+                    occ['name'] in excluded_names or
+                    (occ['suite'] and f"{occ['suite']} / {occ['name']}" in excluded_names)
+                )
+            )
+        ]
         status_counts = Counter((occ.get('status') or 'UNKNOWN') for occ in file_occurrences)
         per_file.append({
             'file_index': idx,
@@ -272,6 +283,11 @@ def build_merge_preview(
 
     by_name: dict[str, list[dict]] = {}
     for occ in occurrences:
+        if excluded_names and (
+            occ['name'] in excluded_names or
+            (occ['suite'] and f"{occ['suite']} / {occ['name']}" in excluded_names)
+        ):
+            continue
         by_name.setdefault(occ['name'], []).append(occ)
 
     repeated = {
@@ -536,6 +552,101 @@ def _prepare_selective_update_paths(
     return prepared, kept_total
 
 
+def _filter_suite_for_excluded_tests(
+    suite: ET.Element,
+    excluded_names: set[str],
+    suite_path: tuple[str, ...] = (),
+) -> int:
+    removed = 0
+    suite_name = suite.get('name', '')
+    current_path = (*suite_path, suite_name) if suite_name else suite_path
+
+    for child in list(suite):
+        tag = child.tag.rsplit('}', 1)[-1]
+        if tag == 'test':
+            test_name = child.get('name', '')
+            full_name = ' / '.join((*current_path, test_name)) if current_path else test_name
+            if test_name in excluded_names or full_name in excluded_names:
+                suite.remove(child)
+                removed += 1
+        elif tag == 'suite':
+            removed += _filter_suite_for_excluded_tests(child, excluded_names, current_path)
+            if not _suite_has_tests(child):
+                suite.remove(child)
+    return removed
+
+
+def _remove_tests_from_xml(output_xml: Path, excluded_tests: set[str]) -> int:
+    if not excluded_tests:
+        return 0
+    tree = ET.parse(str(output_xml))
+    suite = _root_suite(tree.getroot())
+    if suite is None:
+        return 0
+    removed = _filter_suite_for_excluded_tests(suite, excluded_tests)
+    if removed:
+        tree.write(str(output_xml), encoding='UTF-8', xml_declaration=True)
+    return removed
+
+
+def _suite_has_tests_obj(suite) -> bool:
+    if getattr(suite, 'tests', None):
+        return bool(suite.tests)
+    return any(_suite_has_tests_obj(sub) for sub in getattr(suite, 'suites', []))
+
+
+def _filter_execution_result_suite_for_excluded_tests(
+    suite,
+    excluded_keys: set[str],
+    suite_path: tuple[str, ...] = (),
+) -> int:
+    removed = 0
+    suite_name = getattr(suite, 'name', '') or ''
+    current_path = (*suite_path, suite_name) if suite_name else suite_path
+
+    kept_tests = []
+    for test in list(getattr(suite, 'tests', []) or []):
+        name = getattr(test, 'name', '') or ''
+        full_name = ' / '.join((*current_path, name)) if current_path else name
+        if full_name in excluded_keys or name in excluded_keys:
+            removed += 1
+        else:
+            kept_tests.append(test)
+    if hasattr(suite, 'tests'):
+        suite.tests = kept_tests
+
+    for sub in list(getattr(suite, 'suites', []) or []):
+        removed += _filter_execution_result_suite_for_excluded_tests(sub, excluded_keys, current_path)
+    if hasattr(suite, 'suites'):
+        suite.suites = [sub for sub in getattr(suite, 'suites', []) if _suite_has_tests_obj(sub)]
+
+    return removed
+
+
+def list_remove_candidates(xml_paths: list[str], file_names: list[str] | None = None) -> list[dict]:
+    if file_names is None:
+        file_names = [Path(p).name for p in xml_paths]
+
+    tests: dict[str, dict] = {}
+    for idx, xml_path in enumerate(xml_paths):
+        file_name = file_names[idx] if idx < len(file_names) else Path(xml_path).name
+        for occ in _read_test_occurrences(xml_path, idx, file_name):
+            key = f"{occ.get('suite', '')} / {occ['name']}" if occ.get('suite') else occ['name']
+            entry = tests.setdefault(key, {
+                'name': occ['name'],
+                'full_name': key,
+                'suite': occ.get('suite', ''),
+                'last_status': occ.get('status', ''),
+                'last_file': file_name,
+                'occurrences': [],
+            })
+            entry['occurrences'].append({'file_name': file_name, 'status': occ.get('status', '')})
+            entry['last_status'] = occ.get('status', '')
+            entry['last_file'] = file_name
+
+    return sorted(tests.values(), key=lambda item: item['full_name'].lower())
+
+
 def merge_xml_reports(
     xml_paths: list[str],
     output_dir: Path,
@@ -545,6 +656,7 @@ def merge_xml_reports(
     suite_name: str | None = None,
     keep_update_history: bool = True,
     selected_update_tests: list[str] | None = None,
+    excluded_tests: list[str] | None = None,
     metadata_overrides: dict[str, str] | None = None,
     file_names: list[str] | None = None,
 ) -> dict:
@@ -655,6 +767,12 @@ def merge_xml_reports(
         except Exception as exc:
             raise RuntimeError(f'Failed to post-process merged XML: {exc}') from exc
 
+        if excluded_tests:
+            try:
+                _remove_tests_from_xml(output_xml, {name for name in excluded_tests if name})
+            except Exception as exc:
+                raise RuntimeError(f'Failed to remove excluded tests from merged XML: {exc}') from exc
+
         # ------------------------------------------------------------------ #
         # Re-generate log.html + report.html from the repaired XML            #
         # ------------------------------------------------------------------ #
@@ -683,6 +801,7 @@ def merge_xml_reports(
             'files': created,
             'stripped_history_count': stripped_history_count,
             'selective_update_count': selective_count,
+            'removed_count': removed_count,
         }
 
     # ---------------------------------------------------------------------- #
@@ -785,6 +904,13 @@ def merge_xml_reports(
     except Exception as exc:
         raise RuntimeError(f'Failed to save merged XML: {exc}') from exc
 
+    removed_count = 0
+    if excluded_tests:
+        try:
+            removed_count = _remove_tests_from_xml(output_xml, {name for name in excluded_tests if name})
+        except Exception as exc:
+            raise RuntimeError(f'Failed to remove excluded tests from merged XML: {exc}') from exc
+
     if not output_xml.exists():
         raise RuntimeError('Failed to create merged XML file.')
 
@@ -818,4 +944,7 @@ def merge_xml_reports(
     if not created:
         raise RuntimeError('rebot produced no files. Check the input XML format.')
 
-    return {'files': created}
+    result = {'files': created}
+    if removed_count:
+        result['removed_count'] = removed_count
+    return result

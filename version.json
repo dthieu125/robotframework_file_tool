@@ -1,8 +1,15 @@
 {
-  "version": "1.6.3",
+  "version": "1.6.4",
   "name": "Robot Framework Web Tool",
   "summary": "Local web and CLI utilities for Robot Framework output files.",
   "changelog": [
+    {
+      "version": "1.6.4",
+      "date": "2026-07-22",
+      "changes": [
+        "Adjusted Result Editor file summary styling for consistent dark and light mode theming."
+      ]
+    },
     {
       "version": "1.6.3",
       "date": "2026-07-14",
